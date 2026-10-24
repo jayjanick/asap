@@ -5,6 +5,32 @@
     <link rel="icon" type="image/png" href="/assets/aistudio/asap_0e7fa1e8.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
+    <!-- Fix for Chrome Extension request interceptors (e.g. Urban VPN / adblockers) attempting to overwrite window.fetch -->
+    <script>
+      (function() {
+        try {
+          var _f = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() { return _f; },
+            set: function(v) { _f = v; },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {}
+
+        window.addEventListener('error', function(event) {
+          if (
+            (event.filename && event.filename.indexOf('chrome-extension://') !== -1) ||
+            (event.message && event.message.indexOf('Cannot set property fetch') !== -1)
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+    
     <title>asap — Plataforma Educativa y Flujo Docente</title>
     <meta name="description" content="Plataforma educativa y de flujo de trabajo diario para docentes del sistema público ecuatoriano con inteligencia artificial integrada." />
     

@@ -10,6 +10,14 @@ export default defineConfig({
     {
       name: 'express-api-middleware',
       configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/' || req.url === '') {
+            res.writeHead(302, { Location: '/asap/' });
+            res.end();
+            return;
+          }
+          next();
+        });
         server.middlewares.use(expressApp);
       },
     },
