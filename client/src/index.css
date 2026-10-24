@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --radius: 0.75rem; /* 12px global */
+    --baltic-blue: #176087;
+    --prussian-blue: #0A2239;
+    --frosted-blue: #9ED8ED;
+  }
+
+  body {
+    font-family: 'DM Sans', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    color: #0f172a;
+    background-color: #f8fafc;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .dark body {
+    color: #f8fafc;
+    background-color: #071727;
+  }
+}
+
+/* Transiciones fluidas */
+* {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Tabular figures para notas y estadísticas */
+.font-mono, [data-tabular] {
+  font-variant-numeric: tabular-nums;
+}

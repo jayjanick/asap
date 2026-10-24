@@ -1,0 +1,6 @@
+{
+  "name": "asap",
+  "description": "Plataforma educativa y de flujo de trabajo diario para docentes del sistema público ecuatoriano con inteligencia artificial integrada.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
