@@ -4,6 +4,7 @@ import path from 'path';
 import { app as expressApp } from './server/routes/api';
 
 export default defineConfig({
+  base: '/asap/',
   plugins: [
     react(),
     {
