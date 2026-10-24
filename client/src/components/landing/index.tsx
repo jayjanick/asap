@@ -71,17 +71,10 @@ export const LandingNavbar: React.FC = () => {
         {/* Logo */}
         <a href="#inicio" className="flex items-center gap-2 shrink-0">
           <img
-            src="/assets/aistudio/asap__3__5eb0a88f.png"
+            src={isDark ? "/asap/assets/aistudio/light_no-bg_f57d3182.png" : "/asap/assets/aistudio/no_bg_a8451225.png"}
             alt="asap"
             className="max-w-[100px] h-auto object-contain"
-            onError={(e) => {
-              const target = e.currentTarget;
-              target.style.display = 'none';
-              const fallback = target.nextElementSibling as HTMLElement;
-              if (fallback) fallback.style.display = 'inline';
-            }}
           />
-          <span className="hidden text-2xl font-black text-[#9ED8ED]">asap</span>
         </a>
 
         {/* Links Centrados en Desktop (P4.3) */}
@@ -729,17 +722,10 @@ export const LandingFooter: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center gap-3">
           <img
-            src="/assets/aistudio/asap__3__5eb0a88f.png"
+            src="/asap/assets/aistudio/light_no-bg_f57d3182.png"
             alt="asap logo"
             className="max-w-[90px] h-auto object-contain"
-            onError={(e) => {
-              const target = e.currentTarget;
-              target.style.display = 'none';
-              const fallback = target.nextElementSibling as HTMLElement;
-              if (fallback) fallback.style.display = 'inline';
-            }}
           />
-          <span className="hidden font-black text-white text-lg tracking-tight">asap</span>
           <span className="text-[11px] text-slate-500 border-l border-slate-800 pl-3">
             © {new Date().getFullYear()} asap. Infraestructura digital educativa para el Ecuador.
           </span>

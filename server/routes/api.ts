@@ -275,34 +275,158 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
   res.json({ success: true, user: DOCENTE_ACTUAL });
 });
 
-app.post('/api/auth/register', (req: Request, res: Response) => {
-  const { nombre, email, institucion, cursos } = req.body;
-  const user = {
-    ...DOCENTE_ACTUAL,
-    nombre: nombre || 'Docente Registrado',
-    email: email || 'docente@asap.ec',
-    institucion: institucion || 'Unidad Educativa Fiscal',
-  };
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  try {
+    const {
+      nombre,
+      email,
+      password,
+      edad,
+      rol,
+      institucion,
+      provincia,
+      canton,
+      niveles,
+      especialidadTecnica,
+      cursos,
+      estudiantesPorCurso
+    } = req.body;
 
-  const token = jwt.sign(
-    {
-      id: 'docente-new',
-      email: user.email,
-      nombre: user.nombre,
-      rol: 'Docente',
-      institucion: user.institucion
-    },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
+    if (!nombre || !email) {
+      return res.status(400).json({ success: false, error: 'Nombre y correo son requeridos.' });
+    }
 
-  res.status(201).json({
-    success: true,
-    message: 'Docente registrado exitosamente',
-    token,
-    user,
-    cursosRegistrados: cursos || []
-  });
+    const cleanEmail = email.toLowerCase().trim();
+
+    let savedUserId = 'docente-new';
+    let mongoUser = null;
+
+    if (isMongoConnected()) {
+      try {
+        let existing = await Usuario.findOne({ email: cleanEmail });
+        if (!existing) {
+          existing = await Usuario.create({
+            nombre: nombre.trim(),
+            email: cleanEmail,
+            password: password || 'asap2026',
+            rol: rol || 'Docente',
+            institucion: institucion || 'Unidad Educativa',
+            materias: (cursos || []).map((c: any) => c.materia).filter(Boolean)
+          });
+        }
+        mongoUser = existing;
+        savedUserId = existing._id.toString();
+      } catch (err) {
+        console.warn('Error guardando usuario en MongoDB:', err);
+      }
+    }
+
+    const createdParalelos: any[] = [];
+
+    if (Array.isArray(cursos)) {
+      for (const curso of cursos) {
+        const paraleloNombre = `${curso.grado || 'Curso'} "${curso.paralelo || 'A'}" - ${curso.materia || 'General'}`;
+        const estudiantesParaEsteCurso = (estudiantesPorCurso && estudiantesPorCurso[curso.id]) || [];
+
+        let mongoParalelo: any = null;
+        if (isMongoConnected() && mongoUser) {
+          try {
+            const gradoNum = parseInt((curso.grado || '').replace(/\D/g, '')) || 8;
+            mongoParalelo = await Paralelo.create({
+              nombre: paraleloNombre,
+              grado: gradoNum,
+              jornada: 'Matutina',
+              docenteId: mongoUser._id,
+              materias: [curso.materia || 'General'],
+              nivel: curso.nivel || 'Educación Básica Superior',
+              especialidad: especialidadTecnica || ''
+            });
+
+            if (Array.isArray(estudiantesParaEsteCurso) && estudiantesParaEsteCurso.length > 0) {
+              const alumnoDocs = estudiantesParaEsteCurso.map((est: any) => ({
+                nombre: est.nombre,
+                cedula: est.cedula || '',
+                paraleloId: mongoParalelo._id,
+                activo: true
+              }));
+              await Alumno.insertMany(alumnoDocs);
+            }
+          } catch (pErr) {
+            console.warn('Error guardando paralelo/alumnos en MongoDB:', pErr);
+          }
+        }
+
+        // Sincronizar también con paralelosState en memoria
+        const newParaleloState = {
+          id: mongoParalelo ? mongoParalelo._id.toString() : `p-custom-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          nombre: `${curso.grado || 'Curso'} "${curso.paralelo || 'A'}"`,
+          materia: curso.materia || 'General',
+          grado: curso.grado || '8vo EGB',
+          jornada: 'Matutina',
+          totalEstudiantes: estudiantesParaEsteCurso.length || curso.estudiantesAprox || 30,
+          asistenciaHoyRegistrada: false,
+          porcentajeAsistenciaMes: 100,
+          aula: 'Bloque A · Aula 101',
+          horario: '07:15 - 08:45',
+          estudiantes: estudiantesParaEsteCurso.length > 0
+            ? estudiantesParaEsteCurso.map((e: any, idx: number) => ({
+                id: `est-new-${idx + 1}`,
+                nombre: e.nombre,
+                cedula: e.cedula || '',
+                numeroLista: e.lista || idx + 1,
+                faltasJustificadas: 0,
+                faltasInjustificadas: 0,
+                atrasos: 0
+              }))
+            : Array.from({ length: curso.estudiantesAprox || 30 }).map((_, idx) => ({
+                id: `est-ph-${idx + 1}`,
+                nombre: `Estudiante ${idx + 1}`,
+                cedula: `09${10000000 + idx}`,
+                numeroLista: idx + 1,
+                faltasJustificadas: 0,
+                faltasInjustificadas: 0,
+                atrasos: 0
+              }))
+        };
+
+        paralelosState.unshift(newParaleloState);
+        createdParalelos.push(newParaleloState);
+      }
+    }
+
+    const userResponse = {
+      id: savedUserId,
+      nombre: nombre.trim(),
+      email: cleanEmail,
+      rol: rol || 'Docente',
+      institucion: institucion || 'Unidad Educativa',
+      materias: (cursos || []).map((c: any) => c.materia).filter(Boolean),
+      avatar: DOCENTE_ACTUAL.avatar
+    };
+
+    const token = jwt.sign(
+      {
+        id: savedUserId,
+        email: cleanEmail,
+        nombre: userResponse.nombre,
+        rol: userResponse.rol,
+        institucion: userResponse.institucion
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Docente y cursos registrados exitosamente',
+      token,
+      user: userResponse,
+      cursosRegistrados: createdParalelos
+    });
+  } catch (err: any) {
+    console.error('Error en /api/auth/register:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Error al procesar el registro' });
+  }
 });
 
 // ==========================================

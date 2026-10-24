@@ -5,7 +5,8 @@ import { Estudiante } from '../../data/mockData';
 import { User, CheckCircle2, AlertTriangle, XCircle, Clock, Plus, Phone, FileText } from 'lucide-react';
 
 interface StudentProfileModalProps {
-  estudiante: Estudiante | null;
+  estudiante?: Estudiante | null;
+  student?: Estudiante | null;
   paraleloNombre: string;
   isOpen: boolean;
   onClose: () => void;
@@ -14,15 +15,17 @@ interface StudentProfileModalProps {
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   estudiante,
+  student,
   paraleloNombre,
   isOpen,
   onClose,
   onGuardarObservacion
 }) => {
+  const currentStudent = estudiante || student || null;
   const [nuevaObs, setNuevaObs] = useState('');
-  const [observacionesList, setObservacionesList] = useState<string[]>(estudiante?.observaciones || []);
+  const [observacionesList, setObservacionesList] = useState<string[]>(currentStudent?.observaciones || []);
 
-  if (!estudiante) return null;
+  if (!currentStudent) return null;
 
   const handleAgregarObservacion = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +33,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     const actualizada = [...observacionesList, nuevaObs.trim()];
     setObservacionesList(actualizada);
     if (onGuardarObservacion) {
-      onGuardarObservacion(estudiante.id, nuevaObs.trim());
+      onGuardarObservacion(currentStudent.id, nuevaObs.trim());
     }
     setNuevaObs('');
   };
@@ -39,8 +42,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={estudiante.nombre}
-      subtitle={`Lista #${estudiante.numeroLista} · ${paraleloNombre} · Cédula: ${estudiante.cedula}`}
+      title={currentStudent.nombre}
+      subtitle={`Lista #${currentStudent.numeroLista} · ${paraleloNombre} · Cédula: ${currentStudent.cedula}`}
       maxWidth="2xl"
     >
       <div className="space-y-6 text-sm">
@@ -49,20 +52,20 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#071727] border border-slate-200/80 dark:border-slate-800">
             <span className="text-xs text-slate-500 dark:text-slate-400 block">Promedio Actual</span>
             <div className="flex items-baseline gap-1 mt-1">
-              <span className={`text-2xl font-bold font-mono ${estudiante.promedioGeneral >= 7 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {estudiante.promedioGeneral.toFixed(2)}
+              <span className={`text-2xl font-bold font-mono ${currentStudent.promedioGeneral >= 7 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {currentStudent.promedioGeneral.toFixed(2)}
               </span>
               <span className="text-xs text-slate-400">/10</span>
             </div>
             <span className="text-[11px] text-slate-500 mt-0.5 block">
-              {estudiante.promedioGeneral >= 7 ? 'Aprobado regular' : 'Requiere refuerzo'}
+              {currentStudent.promedioGeneral >= 7 ? 'Aprobado regular' : 'Requiere refuerzo'}
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#071727] border border-slate-200/80 dark:border-slate-800">
             <span className="text-xs text-slate-500 dark:text-slate-400 block">% Asistencia</span>
             <div className="text-2xl font-bold font-mono text-[#176087] dark:text-[#9ED8ED] mt-1">
-              {estudiante.asistenciaMes}%
+              {currentStudent.asistenciaMes}%
             </div>
             <span className="text-[11px] text-slate-500 mt-0.5 block">Mes lectivo</span>
           </div>
@@ -70,17 +73,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#071727] border border-slate-200/80 dark:border-slate-800">
             <span className="text-xs text-slate-500 dark:text-slate-400 block">Faltas Injustificadas</span>
             <div className="text-2xl font-bold font-mono text-rose-600 mt-1">
-              {estudiante.faltasInjustificadas}
+              {currentStudent.faltasInjustificadas}
             </div>
             <span className="text-[11px] text-slate-500 mt-0.5 block">
-              {estudiante.faltasJustificadas} Justificadas
+              {currentStudent.faltasJustificadas} Justificadas
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#071727] border border-slate-200/80 dark:border-slate-800">
             <span className="text-xs text-slate-500 dark:text-slate-400 block">Atrasos</span>
             <div className="text-2xl font-bold font-mono text-amber-600 mt-1">
-              {estudiante.atrasos}
+              {currentStudent.atrasos}
             </div>
             <span className="text-[11px] text-slate-500 mt-0.5 block">Acumulados</span>
           </div>
@@ -100,7 +103,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
           <div className="flex items-center gap-2">
             <Phone className="w-3.5 h-3.5 text-[#176087] dark:text-[#9ED8ED]" />
             <span className="font-mono text-xs font-semibold text-[#176087] dark:text-[#9ED8ED]">
-              {estudiante.telefonoRepresentante || '+593 99 481 9283'}
+              {currentStudent.telefonoRepresentante || '+593 99 481 9283'}
             </span>
           </div>
         </div>

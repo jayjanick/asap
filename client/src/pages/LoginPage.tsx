@@ -5,7 +5,7 @@ import { Button, Input } from '../components/ui';
 import { Sparkles, ArrowRight, ShieldCheck, Mail, Lock } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { login, loginWithGoogle } = useAuth();
+  const { login, loginWithGoogle, darkMode } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('andres.morales@uefdemocracia.edu.ec');
   const [password, setPassword] = useState('asap2024');
@@ -48,22 +48,13 @@ export const LoginPage: React.FC = () => {
 
       {/* Login Card */}
       <div className="relative w-full max-w-md bg-white dark:bg-[#0A2239] text-slate-900 dark:text-white rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-8 sm:p-10 z-10 text-center">
-        {/* Logo oficial de asap centrado (ancho máximo 160px según especificación) */}
+        {/* Logo oficial de asap centrado */}
         <div className="flex justify-center mb-6">
           <img
-            src="/assets/aistudio/asap_0e7fa1e8.png"
+            src={darkMode ? "/asap/assets/aistudio/light_no-bg_f57d3182.png" : "/asap/assets/aistudio/no_bg_a8451225.png"}
             alt="asap logo"
             className="max-w-[150px] h-auto object-contain"
-            onError={(e) => {
-              const target = e.currentTarget;
-              target.style.display = 'none';
-              const fallback = target.nextElementSibling as HTMLElement;
-              if (fallback) fallback.style.display = 'block';
-            }}
           />
-          <h1 className="hidden text-3xl font-black tracking-tight text-[#176087] dark:text-[#9ED8ED]">
-            asap
-          </h1>
         </div>
 
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium">

@@ -58,25 +58,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}>
           <Link to="/dashboard" className="flex items-center gap-2 overflow-hidden">
             {collapsed ? (
-              <div className="w-10 h-10 rounded-xl bg-[#176087] flex items-center justify-center text-white font-black text-xl shadow-md border border-[#9ED8ED]/30">
-                <span className="text-[#9ED8ED] lowercase">a</span>
-              </div>
+              <img
+                src="/asap/assets/aistudio/favicon-asapa_d3f25d5e.png"
+                alt="asap"
+                className="w-8 h-8 object-contain"
+              />
             ) : (
               <div className="flex items-center gap-2">
                 <img
-                  src="/assets/aistudio/asap__3__5eb0a88f.png"
+                  src="/asap/assets/aistudio/light_no-bg_f57d3182.png"
                   alt="asap logo"
-                  className="max-w-[110px] h-auto object-contain"
-                  onError={(e) => {
-                    const target = e.currentTarget;
-                    target.style.display = 'none';
-                    const fallback = target.nextElementSibling as HTMLElement;
-                    if (fallback) fallback.style.display = 'flex';
-                  }}
+                  className="max-w-[100px] h-auto object-contain"
                 />
-                <span className="hidden text-2xl font-black tracking-tight text-[#9ED8ED] select-none">
-                  asap
-                </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#176087] text-[#9ED8ED] font-semibold uppercase tracking-wider">
                   Docente
                 </span>
