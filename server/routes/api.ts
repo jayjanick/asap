@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
 import {
   DOCENTE_ACTUAL,
   PARALELOS_INICIALES,
@@ -14,25 +15,121 @@ import {
   generarInformeInstitucional,
   sugerirTareasTodo
 } from '../services/gemini';
+import { connectDB, isMongoConnected } from '../db';
+import { seedDatabase } from '../seed';
+import Usuario from '../models/Usuario';
+import Paralelo from '../models/Paralelo';
+import Alumno from '../models/Alumno';
+import Documento from '../models/Documento';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'asap-super-secret-key-2026';
 
 export const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// In-memory state store mirroring MongoDB state for instant and reliable execution
+// Conexión asíncrona a MongoDB Atlas con fallback en memoria
+connectDB().then((connected) => {
+  if (connected) {
+    seedDatabase(false);
+  }
+});
+
+// Almacén de estado en memoria (fallback persistente durante la sesión)
 let paralelosState = JSON.parse(JSON.stringify(PARALELOS_INICIALES));
 let actividadesState = JSON.parse(JSON.stringify(ACTIVIDADES_INICIALES));
 let planificacionesState = JSON.parse(JSON.stringify(PLANIFICACIONES_MINEDUC));
 let kanbanTasks = [
-  { id: 'kb-1', titulo: 'Revisar borradores de crónica barrial', paralelo: '8vo A', columna: 'En progreso', prioridad: 'Alta', fecha: '2026-10-24' },
-  { id: 'kb-2', titulo: 'Subir calificaciones Parcial 1 al sistema', paralelo: '9no B', columna: 'Por hacer', prioridad: 'Urgente', fecha: '2026-10-25' },
-  { id: 'kb-3', titulo: 'Convocatoria a reunión de representantes', paralelo: '8vo A', columna: 'Completado', prioridad: 'Media', fecha: '2026-10-21' },
-  { id: 'kb-4', titulo: 'Preparar material para el bloque 3', paralelo: '8vo A', columna: 'Por hacer', prioridad: 'Baja', fecha: '2026-10-30' }
+  {
+    id: 'kb-1',
+    titulo: 'Revisar borradores de crónica barrial',
+    descripcion: 'Evaluar coherencia en párrafos descriptivos y uso de conectores temporales.',
+    paralelo: '8vo A',
+    columna: 'En progreso',
+    prioridad: 'Alta',
+    urgencia: 'Alta',
+    fecha: '2026-10-24',
+    fechaLimite: '2026-10-28',
+    observaciones: 'Coordinar con la comisión pedagógica la rúbrica formativa.',
+    adjuntos: []
+  },
+  {
+    id: 'kb-2',
+    titulo: 'Subir calificaciones Parcial 1 al sistema',
+    descripcion: 'Cierre del primer parcial con notas de deberes y lección escrita.',
+    paralelo: '9no B',
+    columna: 'Por hacer',
+    prioridad: 'Alta',
+    urgencia: 'Alta',
+    fecha: '2026-10-25',
+    fechaLimite: '2026-10-26',
+    observaciones: 'Verificar estudiantes con justificativo médico antes de cerrar el acta.',
+    adjuntos: []
+  },
+  {
+    id: 'kb-3',
+    titulo: 'Convocatoria a reunión de representantes',
+    descripcion: 'Socialización del rendimiento y compromisos de refuerzo.',
+    paralelo: '8vo A',
+    columna: 'Completado',
+    prioridad: 'Media',
+    urgencia: 'Media',
+    fecha: '2026-10-21',
+    fechaLimite: '2026-10-22',
+    observaciones: 'Asistencia del 88% de padres de familia.',
+    adjuntos: []
+  },
+  {
+    id: 'kb-4',
+    titulo: 'Preparar material para el bloque 3',
+    descripcion: 'Diseño de diapositivas interactivas y fichas de lectura sobre lírica ecuatoriana.',
+    paralelo: '8vo A',
+    columna: 'Por hacer',
+    prioridad: 'Baja',
+    urgencia: 'Baja',
+    fecha: '2026-10-30',
+    fechaLimite: '2026-11-05',
+    observaciones: 'Revisar antología de poetas guayaquileños y cuencanos.',
+    adjuntos: []
+  }
 ];
 
-// Matriz de notas por paralelo
-// Map: [paraleloId][estudianteId][actividadId] = nota
+let documentosState: any[] = [
+  {
+    id: 'doc-1',
+    nombre: 'Plan_Curricular_Anual_Lengua_8vo.pdf',
+    categoria: 'Planificación',
+    descripcion: 'PCA oficial aprobado por vicerrectorado periodo 2026-2027',
+    tamano: '380 KB',
+    tipo: 'PDF',
+    fechaSubida: '12/03/2026',
+    contenidoBase64: 'JVBERi0xLjQKJcTl8uXrp/Og0MTGCjQgMCBvYmoKPDwgL0xlbmd0aCA1OSAvRmlsdGVyIC9GbGF0ZURlY29kZSA+PgpzdHJlYW0KeJwrSExPT1HIzFPSUUpMzs8tLslPzlDISSxJLQIyQzJSgYKVkmlqSgEAg3kNEwo=endstream'
+  },
+  {
+    id: 'doc-2',
+    nombre: 'Acta_Junta_Curso_1er_Quimestre.pdf',
+    categoria: 'Institucional',
+    descripcion: 'Acta formal con resoluciones de rendimiento',
+    tamano: '210 KB',
+    tipo: 'PDF',
+    fechaSubida: '28/03/2026',
+    contenidoBase64: 'JVBERi0xLjQKJcTl8uXrp/Og0MTGCjQgMCBvYmoKPDwgL0xlbmd0aCA1OSAvRmlsdGVyIC9GbGF0ZURlY29kZSA+PgpzdHJlYW0KeJwrSExPT1HIzFPSUUpMzs8tLslPzlDISSxJLQIyQzJSgYKVkmlqSgEAg3kNEwo=endstream'
+  },
+  {
+    id: 'doc-3',
+    nombre: 'PRAI_Estudiantes_En_Riesgo.docx',
+    categoria: 'Estudiante',
+    descripcion: 'Planes de refuerzo académico individualizados',
+    tamano: '145 KB',
+    tipo: 'DOCX',
+    fechaSubida: '04/04/2026',
+    contenidoBase64: 'UEsDBBQAAAAIAAAAAAAAAAAAAAAAAAAAAAAIAAAAd29yZC9kb2N1bWVudC54bWw='
+  }
+];
+
+// Matriz de notas por paralelo: [paraleloId][estudianteId][actividadId] = nota
 let calificacionesMatrix: Record<string, Record<string, Record<string, number>>> = {};
 
 function initCalificaciones() {
@@ -42,7 +139,6 @@ function initCalificaciones() {
     p.estudiantes.forEach((est: any) => {
       calificacionesMatrix[p.id][est.id] = {};
       acts.forEach((act: any, idx: number) => {
-        // Base de notas consistente
         const seed = (est.numeroLista * 7 + idx * 13) % 10;
         let nota = 7.0 + (seed / 10) * 2.8;
         if (est.numeroLista === 5 || est.numeroLista === 13) nota = 5.5 + (seed % 3) * 0.4;
@@ -53,6 +149,21 @@ function initCalificaciones() {
 }
 initCalificaciones();
 
+// Helper para extraer usuario de JWT
+function getUserFromToken(req: Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    return decoded;
+  } catch (err) {
+    return null;
+  }
+}
+
 // ==========================================
 // 1. HEALTH & METADATA
 // ==========================================
@@ -62,23 +173,53 @@ app.get('/api/health', (_req: Request, res: Response) => {
     app: 'asap',
     time: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    mongoConnected: isMongoConnected(),
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY)
   });
 });
 
 // ==========================================
-// 2. AUTHENTICATION (JWT + Demo login)
+// 2. AUTHENTICATION (JWT + Demo + Google OAuth)
 // ==========================================
-app.post('/api/auth/login', (req: Request, res: Response) => {
+app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
-  
-  // En MVP permitimos ingreso con cualquier credencial o las de Andrés Morales
-  const user = {
-    ...DOCENTE_ACTUAL,
-    email: email || DOCENTE_ACTUAL.email,
-  };
 
-  const token = 'asap-jwt-demo-token-' + Buffer.from(user.email).toString('base64');
+  let user = { ...DOCENTE_ACTUAL };
+  if (email) {
+    user.email = email;
+  }
+
+  // Si Mongo está conectado, consultar usuario
+  if (isMongoConnected() && email) {
+    try {
+      const dbUser = await Usuario.findOne({ email: email.toLowerCase() });
+      if (dbUser) {
+        user = {
+          ...user,
+          nombre: dbUser.nombre,
+          email: dbUser.email,
+          rol: dbUser.rol,
+          institucion: dbUser.institucion,
+          materias: dbUser.materias
+        };
+      }
+    } catch (err) {
+      console.warn('Error leyendo usuario en MongoDB:', err);
+    }
+  }
+
+  const token = jwt.sign(
+    {
+      id: user.id || 'docente-1',
+      email: user.email,
+      nombre: user.nombre,
+      rol: user.rol,
+      institucion: user.institucion
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
   res.json({
     success: true,
     token,
@@ -87,23 +228,81 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/auth/register', (req: Request, res: Response) => {
-  const { nombre, email, institucion, cursos } = req.body;
-  res.status(201).json({
-    success: true,
-    message: 'Docente registrado exitosamente',
-    user: {
-      ...DOCENTE_ACTUAL,
-      nombre: nombre || 'Docente Registrado',
-      email: email || 'docente@asap.ec',
-      institucion: institucion || 'Unidad Educativa Fiscal',
+app.post('/api/auth/google', async (req: Request, res: Response) => {
+  const { credential, email, nombre, avatar } = req.body;
+
+  // Manejo de Google OAuth real o simulación
+  const user = {
+    ...DOCENTE_ACTUAL,
+    nombre: nombre || 'Lic. Andrés Morales',
+    email: email || 'andres.morales@uefdemocracia.edu.ec',
+    avatar: avatar || 'https://picsum.photos/seed/google_avatar/150/150'
+  };
+
+  const token = jwt.sign(
+    {
+      id: user.id || 'docente-1',
+      email: user.email,
+      nombre: user.nombre,
+      rol: user.rol,
+      institucion: user.institucion,
+      authProvider: 'google'
     },
-    cursosRegistrados: cursos || []
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  res.json({
+    success: true,
+    token,
+    user,
+    message: 'Sesión iniciada con Google'
   });
 });
 
-app.get('/api/auth/me', (_req: Request, res: Response) => {
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  const userPayload = getUserFromToken(req);
+  if (userPayload) {
+    return res.json({
+      success: true,
+      user: {
+        ...DOCENTE_ACTUAL,
+        ...userPayload
+      }
+    });
+  }
+  // Fallback demo
   res.json({ success: true, user: DOCENTE_ACTUAL });
+});
+
+app.post('/api/auth/register', (req: Request, res: Response) => {
+  const { nombre, email, institucion, cursos } = req.body;
+  const user = {
+    ...DOCENTE_ACTUAL,
+    nombre: nombre || 'Docente Registrado',
+    email: email || 'docente@asap.ec',
+    institucion: institucion || 'Unidad Educativa Fiscal',
+  };
+
+  const token = jwt.sign(
+    {
+      id: 'docente-new',
+      email: user.email,
+      nombre: user.nombre,
+      rol: 'Docente',
+      institucion: user.institucion
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  res.status(201).json({
+    success: true,
+    message: 'Docente registrado exitosamente',
+    token,
+    user,
+    cursosRegistrados: cursos || []
+  });
 });
 
 // ==========================================
@@ -112,6 +311,30 @@ app.get('/api/auth/me', (_req: Request, res: Response) => {
 app.get('/api/dashboard', async (_req: Request, res: Response) => {
   const actividadesPendientes = actividadesState.filter((a: any) => a.estado === 'Por calificar').length;
   const paralelosNombres = paralelosState.map((p: any) => p.nombre);
+
+  // Cálculo del estado en curso según la hora del sistema
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  // Jornada matutina escolar ecuatoriana: 07:15 (435 min) a 12:45 (765 min)
+  let claseActual = null;
+  if (currentMinutes >= 435 && currentMinutes <= 525) {
+    claseActual = {
+      paralelo: '8vo EGB "A"',
+      materia: 'Lengua y Literatura',
+      aula: 'Bloque B · Aula 204',
+      horario: '07:15 a 08:45',
+      tema: 'Estructura y conectores en el ensayo argumentativo'
+    };
+  } else if (currentMinutes > 525 && currentMinutes <= 600) {
+    claseActual = {
+      paralelo: '9no EGB "B"',
+      materia: 'Lengua y Literatura',
+      aula: 'Bloque A · Aula 102',
+      horario: '08:45 a 10:00',
+      tema: 'Métrica y recursos estilísticos en la poesía lírica'
+    };
+  }
 
   const smartTodo = await sugerirTareasTodo({
     actividadesSinCalificar: actividadesPendientes,
@@ -126,25 +349,19 @@ app.get('/api/dashboard', async (_req: Request, res: Response) => {
     resumenHoy: {
       fecha: new Date().toLocaleDateString('es-EC', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
       jornada: 'Matutina (07:15 - 12:45)',
-      claseActual: {
-        paralelo: '8vo EGB "A"',
-        materia: 'Lengua y Literatura',
-        aula: 'Bloque B · Aula 204',
-        horario: '07:15 a 08:45',
-        tema: 'Estructura y conectores en el ensayo argumentativo'
-      },
+      claseActual,
       proximaClase: {
         paralelo: '9no EGB "B"',
         materia: 'Lengua y Literatura',
         horario: '10:00 a 11:30',
-        tema: 'Métrica y recursos estilísticos'
+        tema: 'Taller de redacción de microcuentos'
       }
     },
     estadisticas: {
       totalEstudiantes: 60,
       actividadesPorCalificar: actividadesPendientes,
-      clasesPlanificadasSemana: 12,
-      asistenciaPromedioMes: 94.2,
+      clasesPlanificadasSemana: 14,
+      asistenciaPromedioMes: 94.8,
       informesGenerados: 3
     },
     porHacerInteligente: smartTodo,
@@ -184,7 +401,6 @@ app.get('/api/asistencia/:cursoId', (req: Request, res: Response) => {
     return res.status(404).json({ success: false, error: 'Paralelo no encontrado' });
   }
 
-  // Generar datos de asistencia de hoy si existen o inicializar en P
   const asistenciaHoy = paralelo.estudiantes.map((est: any, idx: number) => {
     let estado: 'P' | 'A' | 'F' = 'P';
     let justificada = false;
@@ -197,9 +413,11 @@ app.get('/api/asistencia/:cursoId', (req: Request, res: Response) => {
     } else if (idx === 12) {
       estado = 'A';
       motivo = 'Llegada 10 min tarde por transporte';
-    } else if (idx === 19 && !paralelo.asistenciaHoyRegistrada) {
-      estado = 'P';
     }
+
+    const totalDias = 20; // Días laborables del mes
+    const totalFaltas = (est.faltasJustificadas || 0) + (est.faltasInjustificadas || 0);
+    const porcentajeFaltas = Number(((totalFaltas / totalDias) * 100).toFixed(1));
 
     return {
       estudianteId: est.id,
@@ -208,7 +426,11 @@ app.get('/api/asistencia/:cursoId', (req: Request, res: Response) => {
       cedula: est.cedula,
       estado,
       justificada,
-      motivo
+      motivo,
+      faltasJustificadas: est.faltasJustificadas || 0,
+      faltasInjustificadas: est.faltasInjustificadas || 0,
+      atrasos: est.atrasos || 0,
+      porcentajeFaltas
     };
   });
 
@@ -220,7 +442,7 @@ app.get('/api/asistencia/:cursoId', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/asistencia/:cursoId', (req: Request, res: Response) => {
+app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   const { registros, observacionGeneral } = req.body;
   const index = paralelosState.findIndex((p: any) => p.id === req.params.cursoId);
   if (index === -1) {
@@ -228,20 +450,32 @@ app.post('/api/asistencia/:cursoId', (req: Request, res: Response) => {
   }
 
   paralelosState[index].asistenciaHoyRegistrada = true;
-  
-  // Actualizar estadísticas individuales
+
   if (Array.isArray(registros)) {
     registros.forEach((reg: any) => {
       const est = paralelosState[index].estudiantes.find((e: any) => e.id === reg.estudianteId);
       if (est) {
         if (reg.estado === 'F') {
-          if (reg.justificada) est.faltasJustificadas++;
-          else est.faltasInjustificadas++;
+          if (reg.justificada) est.faltasJustificadas = (est.faltasJustificadas || 0) + 1;
+          else est.faltasInjustificadas = (est.faltasInjustificadas || 0) + 1;
         } else if (reg.estado === 'A') {
-          est.atrasos++;
+          est.atrasos = (est.atrasos || 0) + 1;
         }
       }
     });
+  }
+
+  // Si Mongo está conectado, persistir también en base de datos
+  if (isMongoConnected()) {
+    try {
+      const ParaleloModel = Paralelo;
+      await ParaleloModel.findOneAndUpdate(
+        { nombre: paralelosState[index].nombre },
+        { asistenciaHoyRegistrada: true }
+      );
+    } catch (err) {
+      console.warn('Error sincronizando asistencia en MongoDB:', err);
+    }
   }
 
   res.json({
@@ -256,7 +490,7 @@ app.post('/api/asistencia/:cursoId', (req: Request, res: Response) => {
 // 5. CALIFICACIONES & ANÁLISIS IA
 // ==========================================
 app.get('/api/calificaciones/:cursoId', (req: Request, res: Response) => {
-  const paralelo = paralelosState.find((p: any) => p.id === req.params.cursoId);
+  const paralelo = paralelosState.find((p: any) => p.id === req.params.cursoId) || paralelosState[0];
   if (!paralelo) {
     return res.status(404).json({ success: false, error: 'Paralelo no encontrado' });
   }
@@ -328,16 +562,16 @@ app.post('/api/calificaciones/actividad', (req: Request, res: Response) => {
     ponderacion: Number(ponderacion) || 10,
     entregadosCount: 0,
     totalCount: 30,
-    estado: 'En curso',
+    estado: 'Por calificar',
     bloque: 2
   };
 
   actividadesState.push(nuevaActividad);
 
-  // Inicializar nota en 0 para todos
+  // Inicializar en blanco (placeholder "-") para todos
   if (calificacionesMatrix[paraleloId]) {
     Object.keys(calificacionesMatrix[paraleloId]).forEach((estId) => {
-      calificacionesMatrix[paraleloId][estId][nuevaActividad.id] = 7.0;
+      calificacionesMatrix[paraleloId][estId][nuevaActividad.id] = 0;
     });
   }
 
@@ -347,7 +581,8 @@ app.post('/api/calificaciones/actividad', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/calificaciones/analisis-ia', async (req: Request, res: Response) => {
+// Endpoint oficial de análisis de rendimiento por paralelo
+app.post('/api/ai/analisis-rendimiento', async (req: Request, res: Response) => {
   const { paraleloId } = req.body;
   const paralelo = paralelosState.find((p: any) => p.id === paraleloId) || paralelosState[0];
   const actividades = actividadesState.filter((a: any) => a.paraleloId === paralelo.id);
@@ -384,6 +619,32 @@ app.post('/api/calificaciones/analisis-ia', async (req: Request, res: Response) 
     success: true,
     analisis
   });
+});
+
+// Alias compatible
+app.post('/api/calificaciones/analisis-ia', (req: Request, res: Response) => {
+  return (app as any)._router.handle({ ...req, url: '/api/ai/analisis-rendimiento' }, res, () => {});
+});
+
+// Endpoint oficial de generación de informe con Gemini
+app.post('/api/ai/informe', async (req: Request, res: Response) => {
+  const { paraleloNombre, periodo } = req.body;
+  const informe = await generarInformeInstitucional({
+    docenteNombre: DOCENTE_ACTUAL.nombre,
+    institucion: DOCENTE_ACTUAL.institucion,
+    paraleloNombre: paraleloNombre || '8vo EGB "A"',
+    materia: 'Lengua y Literatura',
+    periodo: periodo || 'Primer Quimestre - Parcial 2',
+    promedio: 8.24,
+    porcentajeAsistencia: 94.6
+  });
+
+  res.json({ success: true, informe });
+});
+
+// Alias compatible
+app.post('/api/workspace/informe-oficial', (req: Request, res: Response) => {
+  return (app as any)._router.handle({ ...req, url: '/api/ai/informe' }, res, () => {});
 });
 
 // ==========================================
@@ -428,56 +689,145 @@ app.post('/api/planificacion', (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 7. WORKSPACE & INFORMES
+// 7. WORKSPACE: KANBAN & MIS DOCUMENTOS
 // ==========================================
 app.get('/api/workspace', (_req: Request, res: Response) => {
   res.json({
     success: true,
     kanbanTasks,
     plantillas: PLANTILLAS_MINEDUC,
-    actividades: actividadesState
+    actividades: actividadesState,
+    documentos: documentosState
   });
 });
 
-app.post('/api/workspace/actividad-ia', async (req: Request, res: Response) => {
-  const { materia, destreza, tipoActividad, nivel } = req.body;
-  const actividad = await generarActividad({
-    materia: materia || 'Lengua y Literatura',
-    destreza: destreza || 'LL.4.1.1. Cultura escrita y sociedad',
-    tipoActividad: tipoActividad || 'Individual',
-    nivel: nivel || '8vo EGB'
-  });
-
-  res.json({ success: true, actividad });
+// Kanban endpoints con soporte de prioridad, fecha límite y observaciones
+app.get('/api/workspace/kanban', (_req: Request, res: Response) => {
+  res.json({ success: true, kanbanTasks });
 });
 
-app.post('/api/workspace/tarea', (req: Request, res: Response) => {
-  const { titulo, paralelo, prioridad } = req.body;
+app.post('/api/workspace/kanban', (req: Request, res: Response) => {
+  const { titulo, descripcion, paralelo, columna, prioridad, urgencia, fechaLimite, observaciones } = req.body;
   const nuevaTarea = {
     id: `kb-${Date.now()}`,
     titulo: titulo || 'Nueva tarea docente',
+    descripcion: descripcion || '',
     paralelo: paralelo || 'General',
-    columna: 'Por hacer',
-    prioridad: prioridad || 'Media',
-    fecha: new Date().toISOString().slice(0, 10)
+    columna: columna || 'Por hacer',
+    prioridad: prioridad || urgencia || 'Media',
+    urgencia: urgencia || prioridad || 'Media',
+    fecha: new Date().toISOString().slice(0, 10),
+    fechaLimite: fechaLimite || '',
+    observaciones: observaciones || '',
+    adjuntos: []
   };
-  kanbanTasks.push(nuevaTarea);
+  kanbanTasks.unshift(nuevaTarea);
   res.status(201).json({ success: true, tarea: nuevaTarea });
 });
 
-app.post('/api/workspace/informe-oficial', async (req: Request, res: Response) => {
-  const { paraleloNombre, periodo } = req.body;
-  const informe = await generarInformeInstitucional({
-    docenteNombre: DOCENTE_ACTUAL.nombre,
-    institucion: DOCENTE_ACTUAL.institucion,
-    paraleloNombre: paraleloNombre || '8vo EGB "A"',
-    materia: 'Lengua y Literatura',
-    periodo: periodo || 'Primer Quimestre',
-    promedio: 8.24,
-    porcentajeAsistencia: 94.6
-  });
+app.put('/api/workspace/kanban/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = kanbanTasks.findIndex((t) => t.id === id);
+  if (index === -1) {
+    return res.status(404).json({ success: false, error: 'Tarea no encontrada' });
+  }
 
-  res.json({ success: true, informe });
+  kanbanTasks[index] = {
+    ...kanbanTasks[index],
+    ...req.body
+  };
+
+  res.json({ success: true, tarea: kanbanTasks[index] });
+});
+
+app.delete('/api/workspace/kanban/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  kanbanTasks = kanbanTasks.filter((t) => t.id !== id);
+  res.json({ success: true, message: 'Tarea eliminada' });
+});
+
+// Endpoints de "Mis Documentos" con soporte para Base64 y categorías
+app.get('/api/workspace/documentos', async (_req: Request, res: Response) => {
+  if (isMongoConnected()) {
+    try {
+      const docs = await Documento.find().sort({ createdAt: -1 });
+      if (docs && docs.length > 0) {
+        return res.json({ success: true, documentos: docs });
+      }
+    } catch (err) {
+      console.warn('Error obteniendo documentos de MongoDB:', err);
+    }
+  }
+  res.json({ success: true, documentos: documentosState });
+});
+
+app.post('/api/workspace/documentos', async (req: Request, res: Response) => {
+  const { nombre, categoria, descripcion, tamano, tipo, contenidoBase64 } = req.body;
+  const nuevoDoc = {
+    id: `doc-${Date.now()}`,
+    nombre: nombre || 'Documento_Docente.pdf',
+    categoria: categoria || 'Personal',
+    descripcion: descripcion || 'Documento administrativo o pedagógico',
+    tamano: tamano || '120 KB',
+    tipo: tipo || 'PDF',
+    fechaSubida: new Date().toLocaleDateString('es-EC'),
+    contenidoBase64: contenidoBase64 || ''
+  };
+
+  documentosState.unshift(nuevoDoc);
+
+  if (isMongoConnected()) {
+    try {
+      await Documento.create({
+        nombre: nuevoDoc.nombre,
+        categoria: nuevoDoc.categoria,
+        descripcion: nuevoDoc.descripcion,
+        tamano: nuevoDoc.tamano,
+        tipo: nuevoDoc.tipo,
+        fechaSubida: nuevoDoc.fechaSubida,
+        contenidoBase64: nuevoDoc.contenidoBase64
+      });
+    } catch (err) {
+      console.warn('Error guardando documento en MongoDB:', err);
+    }
+  }
+
+  res.status(201).json({ success: true, documento: nuevoDoc });
+});
+
+app.get('/api/workspace/documentos/:id/descargar', async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  let doc = documentosState.find((d) => d.id === id);
+  if (!doc && isMongoConnected()) {
+    try {
+      doc = await Documento.findById(id);
+    } catch (err) {}
+  }
+
+  if (!doc) {
+    return res.status(404).json({ success: false, error: 'Documento no encontrado' });
+  }
+
+  res.json({
+    success: true,
+    nombre: doc.nombre,
+    tipo: doc.tipo,
+    contenidoBase64: doc.contenidoBase64
+  });
+});
+
+app.delete('/api/workspace/documentos/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  documentosState = documentosState.filter((d) => d.id !== id);
+
+  if (isMongoConnected()) {
+    try {
+      await Documento.findByIdAndDelete(id);
+    } catch (err) {}
+  }
+
+  res.json({ success: true, message: 'Documento eliminado correctamente' });
 });
 
 export default app;

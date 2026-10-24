@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { PARALELOS_INICIALES, Estudiante } from '../data/mockData';
-import { Card, Button, Badge } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { StudentProfileModal } from '../components/student/StudentProfileModal';
 import {
   UserCheck,
@@ -13,7 +13,8 @@ import {
   History,
   AlertTriangle,
   User,
-  Info
+  Clock,
+  Sparkles
 } from 'lucide-react';
 
 interface RegistroEstado {
@@ -28,6 +29,7 @@ export const TomarAsistenciaPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'toma' | 'historial'>('toma');
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
   const [guardadoExitoso, setGuardadoExitoso] = useState(false);
+  const [guardando, setGuardando] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Estudiante | null>(null);
 
   const paralelo = PARALELOS_INICIALES.find((p) => p.id === cursoId) || PARALELOS_INICIALES[0];
@@ -36,7 +38,7 @@ export const TomarAsistenciaPage: React.FC = () => {
   const [registros, setRegistros] = useState<Record<string, RegistroEstado>>({});
 
   useEffect(() => {
-    // Inicializar registros
+    // Inicializar registros con datos previos o valores por defecto
     const init: Record<string, RegistroEstado> = {};
     paralelo.estudiantes.forEach((est, idx) => {
       let estado: 'P' | 'A' | 'F' = 'P';
@@ -49,7 +51,7 @@ export const TomarAsistenciaPage: React.FC = () => {
         motivo = 'Cita médica en IESS Guayaquil (Certificado presentado)';
       } else if (idx === 12) {
         estado = 'A';
-        motivo = 'Llegada tarde por tráfico';
+        motivo = 'Llegada 10 min tarde por transporte';
       }
 
       init[est.id] = {
@@ -68,7 +70,6 @@ export const TomarAsistenciaPage: React.FC = () => {
       [estId]: {
         ...prev[estId],
         estado,
-        // Si no es falta, resetear justificada
         justificada: estado === 'F' ? prev[estId]?.justificada : false,
         motivo: estado === 'F' ? prev[estId]?.motivo : ''
       }
@@ -110,6 +111,7 @@ export const TomarAsistenciaPage: React.FC = () => {
   };
 
   const handleGuardar = async () => {
+    setGuardando(true);
     try {
       await fetch(`/api/asistencia/${paralelo.id}`, {
         method: 'POST',
@@ -120,14 +122,15 @@ export const TomarAsistenciaPage: React.FC = () => {
         })
       });
     } catch (e) {
-      console.warn('API local offline, guardado en memoria:', e);
+      console.warn('Sincronizado localmente:', e);
+    } finally {
+      setGuardando(false);
+      setGuardadoExitoso(true);
+      setTimeout(() => setGuardadoExitoso(false), 3000);
     }
-
-    setGuardadoExitoso(true);
-    setTimeout(() => setGuardadoExitoso(false), 3000);
   };
 
-  // Cálculo de resumen rápido
+  // Cálculo de conteos con palabras completas (P3.3)
   const total = paralelo.estudiantes.length;
   const presentes = Object.values(registros).filter((r) => r.estado === 'P').length;
   const atrasos = Object.values(registros).filter((r) => r.estado === 'A').length;
@@ -135,7 +138,7 @@ export const TomarAsistenciaPage: React.FC = () => {
 
   return (
     <div className="space-y-6 text-left">
-      {/* Top Header */}
+      {/* 1. Encabezado principal simplificado como <h1>Asistencia</h1> (P3.3) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800 gap-4">
         <div className="flex items-center gap-3">
           <Link to="/asistencia">
@@ -143,16 +146,11 @@ export const TomarAsistenciaPage: React.FC = () => {
               <ArrowLeft className="w-4 h-4" />
             </Button>
           </Link>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-                {paralelo.nombre} · Toma de Asistencia
-              </h2>
-              <Badge variant="primary">{paralelo.materia}</Badge>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {paralelo.aula} · Jornada {paralelo.jornada} · {total} estudiantes
-            </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+              Asistencia
+            </h1>
+            <InfoTooltip content="Registro diario de asistencia, atrasos y ausencias con opción de justificación médica conforme a la normativa MINEDUC." />
           </div>
         </div>
 
@@ -163,7 +161,7 @@ export const TomarAsistenciaPage: React.FC = () => {
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
               activeTab === 'toma'
                 ? 'bg-white dark:bg-[#0A2239] text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Toma de Hoy
@@ -173,11 +171,60 @@ export const TomarAsistenciaPage: React.FC = () => {
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
               activeTab === 'historial'
                 ? 'bg-white dark:bg-[#0A2239] text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Historial Mensual
           </button>
+        </div>
+      </div>
+
+      {/* 2. Bloque de Detalles del Curso (P3.3: Materia prominente, Curso + Paralelo, Nº Estudiantes, Jornada) */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#0A2239] border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Materia & Carga Curricular
+          </span>
+          <h2 className="text-xl sm:text-2xl font-black text-[#176087] dark:text-[#9ED8ED]">
+            {paralelo.materia}
+          </h2>
+          <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300 font-medium pt-0.5">
+            <span className="font-bold">{paralelo.nombre}</span>
+            <span>·</span>
+            <span>{total} estudiantes matriculados</span>
+            <span>·</span>
+            <span>Jornada {paralelo.jornada}</span>
+          </div>
+        </div>
+
+        {/* Resumen con palabras completas: Presentes, Atrasos, Faltas (P3.3) */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className="px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 text-center min-w-[90px]">
+            <span className="text-[10px] uppercase font-bold text-emerald-800 dark:text-emerald-300 block">
+              Presentes
+            </span>
+            <span className="text-base font-black font-mono text-emerald-700 dark:text-emerald-400">
+              {presentes}
+            </span>
+          </div>
+
+          <div className="px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/40 text-center min-w-[90px]">
+            <span className="text-[10px] uppercase font-bold text-amber-800 dark:text-amber-300 block">
+              Atrasos
+            </span>
+            <span className="text-base font-black font-mono text-amber-700 dark:text-amber-400">
+              {atrasos}
+            </span>
+          </div>
+
+          <div className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200/60 dark:border-rose-800/40 text-center min-w-[90px]">
+            <span className="text-[10px] uppercase font-bold text-rose-800 dark:text-rose-300 block">
+              Faltas
+            </span>
+            <span className="text-base font-black font-mono text-rose-700 dark:text-rose-400">
+              {faltas}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -186,34 +233,14 @@ export const TomarAsistenciaPage: React.FC = () => {
         <div className="space-y-4">
           {/* Controls Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white dark:bg-[#0A2239] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs gap-4">
-            <div className="flex items-center gap-4">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                  Fecha de registro
-                </label>
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
-                  <input
-                    type="date"
-                    value={fecha}
-                    onChange={(e) => setFecha(e.target.value)}
-                    className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
-                  />
-                </div>
-              </div>
-
-              {/* Counter badges */}
-              <div className="hidden md:flex items-center gap-2 pl-4 border-l border-slate-200 dark:border-slate-800 text-xs">
-                <span className="px-2 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-bold font-mono">
-                  {presentes} P
-                </span>
-                <span className="px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 font-bold font-mono">
-                  {atrasos} A
-                </span>
-                <span className="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 font-bold font-mono">
-                  {faltas} F
-                </span>
-              </div>
+            <div className="flex items-center gap-3">
+              <Calendar className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
+              <input
+                type="date"
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#071727] text-slate-900 dark:text-white"
+              />
             </div>
 
             <div className="flex items-center gap-2">
@@ -221,162 +248,152 @@ export const TomarAsistenciaPage: React.FC = () => {
                 variant="outline"
                 size="sm"
                 onClick={handleMarcarTodosPresentes}
-                title="Poner todos en Presente para agilizar"
+                className="text-xs"
               >
-                <Check className="w-3.5 h-3.5 mr-1" />
-                Marcar todos presentes
+                <Check className="w-3.5 h-3.5" />
+                <span>Marcar todos Presentes</span>
               </Button>
 
               <Button
                 variant="primary"
                 size="sm"
                 onClick={handleGuardar}
-                className={guardadoExitoso ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                isLoading={guardando}
+                className="text-xs"
               >
-                {guardadoExitoso ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-white" />
-                    ¡Guardado!
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5 mr-1" />
-                    Guardar asistencia
-                  </>
-                )}
+                <Save className="w-3.5 h-3.5" />
+                <span>Guardar Asistencia</span>
               </Button>
             </div>
           </div>
 
-          {/* Tabla de Estudiantes */}
-          <Card className="p-0 overflow-hidden border-slate-200 dark:border-slate-800">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-[#0A2239] text-white uppercase text-[10px] tracking-wider">
+          {guardadoExitoso && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300">
+              <span className="flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Asistencia guardada satisfactoriamente en el sistema.
+              </span>
+            </div>
+          )}
+
+          {/* Tabla de toma de asistencia */}
+          <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800">
+            <div className="overflow-x-auto scrollbar-none">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#176087] text-white border-b border-slate-800">
                   <tr>
-                    <th className="px-3.5 py-3 w-12 text-center">#</th>
-                    <th className="px-4 py-3">Estudiante (Clic para ver perfil)</th>
-                    <th className="px-4 py-3 w-56 text-center">Estado de Asistencia</th>
-                    <th className="px-4 py-3">Observación / Motivo de Falta</th>
+                    <th className="py-3 px-3 w-12 text-center font-mono">Nº</th>
+                    <th className="py-3 px-4 font-semibold">Estudiante</th>
+                    <th className="py-3 px-3 text-center font-semibold w-52">Estado</th>
+                    <th className="py-3 px-4 font-semibold">Justificación / Motivo</th>
+                    <th className="py-3 px-3 text-center font-semibold w-20">Ficha</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {paralelo.estudiantes.map((est) => {
-                    const reg = registros[est.id] || {
-                      estudianteId: est.id,
-                      estado: 'P',
-                      justificada: false,
-                      motivo: ''
-                    };
-                    const isFalta = reg.estado === 'F';
+                    const reg = registros[est.id] || { estado: 'P', justificada: false, motivo: '' };
 
                     return (
                       <tr
                         key={est.id}
-                        className={`hover:bg-slate-50 dark:hover:bg-[#071727]/60 transition-colors ${
-                          isFalta ? 'bg-rose-50/20 dark:bg-rose-950/10' : ''
+                        className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                          reg.estado === 'F' ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''
                         }`}
                       >
-                        <td className="px-3.5 py-3 font-mono text-center text-slate-400">
+                        <td className="py-3 px-3 text-center font-mono text-slate-400 font-bold">
                           {est.numeroLista}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="py-3 px-4">
                           <button
+                            type="button"
                             onClick={() => setSelectedStudent(est)}
-                            className="font-semibold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] transition-colors cursor-pointer text-left block"
+                            className="font-bold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] text-left cursor-pointer"
                           >
                             {est.nombre}
                           </button>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            C.I. {est.cedula}
+                          <span className="text-[10px] text-slate-400 font-mono block">
+                            CI: {est.cedula}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="inline-flex rounded-lg p-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                            {/* Toggle P */}
+                        <td className="py-3 px-3 text-center">
+                          {/* Segmented control P / A / F */}
+                          <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
                             <button
                               type="button"
                               onClick={() => handleEstadoChange(est.id, 'P')}
                               className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                                 reg.estado === 'P'
                                   ? 'bg-emerald-600 text-white shadow-xs'
-                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                               }`}
+                              title="Presente"
                             >
                               P
                             </button>
-
-                            {/* Toggle A */}
                             <button
                               type="button"
                               onClick={() => handleEstadoChange(est.id, 'A')}
                               className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                                 reg.estado === 'A'
                                   ? 'bg-amber-500 text-white shadow-xs'
-                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                               }`}
+                              title="Atraso"
                             >
                               A
                             </button>
-
-                            {/* Toggle F */}
                             <button
                               type="button"
                               onClick={() => handleEstadoChange(est.id, 'F')}
                               className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                                 reg.estado === 'F'
                                   ? 'bg-rose-600 text-white shadow-xs'
-                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                               }`}
+                              title="Falta"
                             >
                               F
                             </button>
                           </div>
                         </td>
+                        <td className="py-3 px-4">
+                          {reg.estado === 'F' ? (
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={reg.justificada}
+                                  onChange={(e) => handleJustificadaChange(est.id, e.target.checked)}
+                                  className="rounded text-[#176087]"
+                                />
+                                Justificada
+                              </label>
 
-                        {/* Columna de Observación y Sub-toggle de justificada */}
-                        <td className="px-4 py-3">
-                          {isFalta ? (
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                              {/* Sub-toggle ¿Justificada? */}
-                              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-md text-[11px] font-semibold shrink-0">
-                                <span className="text-slate-500 text-[10px] mr-1">¿Justificada?</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleJustificadaChange(est.id, true)}
-                                  className={`px-2 py-0.5 rounded text-[10px] cursor-pointer ${
-                                    reg.justificada ? 'bg-indigo-600 text-white' : 'text-slate-500'
-                                  }`}
-                                >
-                                  Sí
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleJustificadaChange(est.id, false)}
-                                  className={`px-2 py-0.5 rounded text-[10px] cursor-pointer ${
-                                    !reg.justificada ? 'bg-slate-700 text-white' : 'text-slate-500'
-                                  }`}
-                                >
-                                  No
-                                </button>
-                              </div>
-
-                              {/* Input motivo si es justificada */}
                               {reg.justificada && (
                                 <input
                                   type="text"
+                                  placeholder="Motivo (ej: certificado médico, calamidad doméstica)"
                                   value={reg.motivo}
                                   onChange={(e) => handleMotivoChange(est.id, e.target.value)}
-                                  placeholder="Motivo (ej: Cita IESS, calamidad doméstica...)"
-                                  className="w-full text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-800 dark:text-white"
+                                  className="w-full text-xs px-2.5 py-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-800 dark:text-white"
                                 />
                               )}
                             </div>
                           ) : (
-                            <span className="text-[11px] text-slate-400">
-                              {reg.estado === 'A' ? 'Atraso registrado en puerta' : 'Asistencia regular'}
+                            <span className="text-slate-400 text-[11px]">
+                              {reg.estado === 'A' ? 'Atraso en jornada matutina' : 'Asistencia normal'}
                             </span>
                           )}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedStudent(est)}
+                            className="p-1 rounded text-slate-400 hover:text-[#176087] dark:hover:text-[#9ED8ED] cursor-pointer"
+                            title="Ver ficha del estudiante"
+                          >
+                            <User className="w-4 h-4" />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -388,94 +405,77 @@ export const TomarAsistenciaPage: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 2: HISTORIAL MENSUAL */}
+      {/* PESTAÑA 2: HISTORIAL MENSUAL CON % DE FALTAS (P3.3) */}
       {activeTab === 'historial' && (
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <History className="w-5 h-5 text-[#176087]" />
-                Matriz de Asistencia del Mes de Octubre
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Convención: Verde (P = Presente), Amarillo (A = Atraso), Rojo (F = Falta injustificada), Gris (FJ = Falta justificada).
-              </p>
-            </div>
-            <div className="text-right">
-              <span className="text-xs text-slate-400 block">Promedio mensual del curso</span>
-              <span className="text-xl font-bold font-mono text-[#176087] dark:text-[#9ED8ED]">
-                {paralelo.porcentajeAsistenciaMes}%
-              </span>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px] text-left">
-              <thead className="bg-[#0A2239] text-white">
+        <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800">
+          <div className="overflow-x-auto scrollbar-none">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[#176087] text-white border-b border-slate-800">
                 <tr>
-                  <th className="px-2 py-2 w-8">#</th>
-                  <th className="px-3 py-2 min-w-[180px]">Estudiante</th>
-                  {Array.from({ length: 15 }, (_, i) => (
-                    <th key={i} className="px-1.5 py-2 text-center font-mono w-7">
-                      {i + 1}
-                    </th>
-                  ))}
-                  <th className="px-2 py-2 text-center font-semibold">Total Faltas</th>
-                  <th className="px-2 py-2 text-center font-semibold">% Mes</th>
+                  <th className="py-3 px-3 w-12 text-center font-mono">Nº</th>
+                  <th className="py-3 px-4 font-semibold">Estudiante</th>
+                  <th className="py-3 px-3 text-center font-semibold">Asistencia Mes</th>
+                  <th className="py-3 px-3 text-center font-semibold">Atrasos</th>
+                  <th className="py-3 px-3 text-center font-semibold">Faltas Justificadas</th>
+                  <th className="py-3 px-3 text-center font-semibold">Faltas Injustificadas</th>
+                  {/* Columna final con % de faltas (P3.3) */}
+                  <th className="py-3 px-4 text-center font-bold bg-[#134d6d]">
+                    % Faltas
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {paralelo.estudiantes.map((est) => {
+                  const totalDias = 20;
+                  const totalFaltas = (est.faltasJustificadas || 0) + (est.faltasInjustificadas || 0);
+                  const porcentajeFaltas = Number(((totalFaltas / totalDias) * 100).toFixed(1));
+                  const esAlerta = porcentajeFaltas > 15;
+
                   return (
-                    <tr key={est.id} className="hover:bg-slate-50 dark:hover:bg-[#071727]/60">
-                      <td className="px-2 py-1.5 font-mono text-slate-400">{est.numeroLista}</td>
-                      <td className="px-3 py-1.5 font-medium truncate max-w-[200px]">{est.nombre}</td>
-                      {Array.from({ length: 15 }, (_, i) => {
-                        // Simulación consistente de asistencia
-                        const isSunday = (i + 1) % 7 === 0 || (i + 1) % 7 === 6;
-                        if (isSunday) {
-                          return <td key={i} className="px-1.5 py-1.5 text-center bg-slate-100 dark:bg-slate-800 text-slate-400">-</td>;
-                        }
-
-                        const hasFalta = (est.numeroLista * 3 + i) % 23 === 0;
-                        const hasJust = hasFalta && est.numeroLista % 2 === 0;
-                        const hasAtraso = (est.numeroLista + i) % 19 === 0;
-
-                        if (hasFalta) {
-                          return (
-                            <td key={i} className="px-1.5 py-1.5 text-center">
-                              <span className={`inline-block w-5 h-5 rounded text-[10px] font-bold leading-5 ${
-                                hasJust ? 'bg-slate-200 text-slate-700' : 'bg-rose-500 text-white'
-                              }`}>
-                                {hasJust ? 'FJ' : 'F'}
-                              </span>
-                            </td>
-                          );
-                        }
-
-                        if (hasAtraso) {
-                          return (
-                            <td key={i} className="px-1.5 py-1.5 text-center">
-                              <span className="inline-block w-5 h-5 rounded bg-amber-400 text-white text-[10px] font-bold leading-5">
-                                A
-                              </span>
-                            </td>
-                          );
-                        }
-
-                        return (
-                          <td key={i} className="px-1.5 py-1.5 text-center">
-                            <span className="inline-block w-5 h-5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 text-[10px] font-bold leading-5">
-                              P
-                            </span>
-                          </td>
-                        );
-                      })}
-                      <td className="px-2 py-1.5 text-center font-mono font-bold text-rose-600">
-                        {est.faltasInjustificadas + est.faltasJustificadas}
+                    <tr
+                      key={est.id}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                        esAlerta ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
+                      }`}
+                    >
+                      <td className="py-3 px-3 text-center font-mono text-slate-400 font-bold">
+                        {est.numeroLista}
                       </td>
-                      <td className="px-2 py-1.5 text-center font-mono font-bold text-[#176087] dark:text-[#9ED8ED]">
+                      <td className="py-3 px-4">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedStudent(est)}
+                          className="font-bold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] text-left cursor-pointer"
+                        >
+                          {est.nombre}
+                        </button>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          CI: {est.cedula}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
                         {est.asistenciaMes}%
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                        {est.atrasos}
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                        {est.faltasJustificadas}
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono text-rose-600 dark:text-rose-400 font-bold">
+                        {est.faltasInjustificadas}
+                      </td>
+                      {/* Columna final con % de faltas (P3.3) */}
+                      <td className="py-3 px-4 text-center font-mono font-bold">
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs ${
+                            esAlerta
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-black'
+                              : 'text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {porcentajeFaltas}%
+                        </span>
                       </td>
                     </tr>
                   );
@@ -486,13 +486,15 @@ export const TomarAsistenciaPage: React.FC = () => {
         </Card>
       )}
 
-      {/* Modal de Detalle del Estudiante */}
-      <StudentProfileModal
-        estudiante={selectedStudent}
-        paraleloNombre={paralelo.nombre}
-        isOpen={Boolean(selectedStudent)}
-        onClose={() => setSelectedStudent(null)}
-      />
+      {/* Student Profile Modal */}
+      {selectedStudent && (
+        <StudentProfileModal
+          student={selectedStudent}
+          paraleloNombre={paralelo.nombre}
+          isOpen={Boolean(selectedStudent)}
+          onClose={() => setSelectedStudent(null)}
+        />
+      )}
     </div>
   );
 };

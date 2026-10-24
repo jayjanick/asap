@@ -1,6 +1,16 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { DOCENTE_ACTUAL } from '../data/mockData';
 
+export interface InstitucionInfo {
+  id: string;
+  nombre: string;
+  codigoAmie: string;
+  distrito: string;
+  rol: string;
+  jornada: string;
+  principal: boolean;
+}
+
 export interface UserProfile {
   id: string;
   nombre: string;
@@ -23,19 +33,61 @@ interface AuthContextType {
   token: string | null;
   darkMode: boolean;
   toggleDarkMode: () => void;
+  institucionActiva: InstitucionInfo;
+  instituciones: InstitucionInfo[];
+  setInstitucionActiva: (inst: InstitucionInfo) => void;
   login: (email?: string, password?: string) => Promise<boolean>;
+  loginWithGoogle: (credential?: string) => Promise<boolean>;
   logout: () => void;
   updateUser: (data: Partial<UserProfile>) => void;
 }
 
+const INSTITUCIONES_MOCK: InstitucionInfo[] = [
+  {
+    id: 'inst-1',
+    nombre: 'U.E. Fisco-Misional Democracia',
+    codigoAmie: '09H01234',
+    distrito: 'Distrito 09D04 · Guayaquil Centro',
+    rol: 'Docente Titular',
+    jornada: 'Matutina',
+    principal: true
+  },
+  {
+    id: 'inst-2',
+    nombre: 'Colegio Experimental Guayaquil',
+    codigoAmie: '09H05678',
+    distrito: 'Distrito 09D03 · Guayaquil Norte',
+    rol: 'Docente Complementario',
+    jornada: 'Vespertina',
+    principal: false
+  }
+];
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('asap_token') || 'demo-jwt-token-asap';
+    }
+    return 'demo-jwt-token-asap';
+  });
+
   const [user, setUser] = useState<UserProfile | null>(() => {
-    // Inicializar con Andrés Morales para permitir navegación inmediata del prototipo
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('asap_user');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
     return DOCENTE_ACTUAL;
   });
-  const [token, setToken] = useState<string | null>('demo-jwt-token-asap');
+
+  const [instituciones, setInstituciones] = useState<InstitucionInfo[]>(INSTITUCIONES_MOCK);
+  const [institucionActiva, setInstitucionActiva] = useState<InstitucionInfo>(INSTITUCIONES_MOCK[0]);
+
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('asap_theme') === 'dark';
@@ -43,6 +95,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return false;
   });
 
+  // Revalidar sesión al cargar
+  useEffect(() => {
+    const savedToken = localStorage.getItem('asap_token');
+    if (savedToken) {
+      fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${savedToken}` }
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.user) {
+            setUser((prev) => ({ ...(prev || DOCENTE_ACTUAL), ...data.user }));
+            localStorage.setItem('asap_user', JSON.stringify({ ...(user || DOCENTE_ACTUAL), ...data.user }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  // Sincronizar dark mode en el DOM
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -66,24 +137,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const data = await res.json();
         setUser(data.user);
         setToken(data.token);
+        localStorage.setItem('asap_token', data.token);
+        localStorage.setItem('asap_user', JSON.stringify(data.user));
         return true;
       }
     } catch (err) {
-      console.warn('API local offline, usando fallback de sesión:', err);
+      console.warn('Fallback local de login:', err);
     }
-    // Fallback instantáneo
-    setUser({ ...DOCENTE_ACTUAL, email: email || DOCENTE_ACTUAL.email });
-    setToken('fallback-token');
+
+    const fallbackUser = { ...DOCENTE_ACTUAL, email: email || DOCENTE_ACTUAL.email };
+    setUser(fallbackUser);
+    setToken('asap-demo-token');
+    localStorage.setItem('asap_token', 'asap-demo-token');
+    localStorage.setItem('asap_user', JSON.stringify(fallbackUser));
+    return true;
+  };
+
+  const loginWithGoogle = async (credential?: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          credential,
+          email: 'andres.morales@uefdemocracia.edu.ec',
+          nombre: 'Lic. Andrés Morales'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        setToken(data.token);
+        localStorage.setItem('asap_token', data.token);
+        localStorage.setItem('asap_user', JSON.stringify(data.user));
+        return true;
+      }
+    } catch (err) {
+      console.warn('Fallback Google login:', err);
+    }
+
+    const googleUser = {
+      ...DOCENTE_ACTUAL,
+      nombre: 'Lic. Andrés Morales (Google)'
+    };
+    setUser(googleUser);
+    setToken('asap-google-token');
+    localStorage.setItem('asap_token', 'asap-google-token');
+    localStorage.setItem('asap_user', JSON.stringify(googleUser));
     return true;
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
+    localStorage.removeItem('asap_token');
+    localStorage.removeItem('asap_user');
   };
 
   const updateUser = (data: Partial<UserProfile>) => {
-    setUser((prev) => (prev ? { ...prev, ...data } : null));
+    setUser((prev) => {
+      const updated = prev ? { ...prev, ...data } : null;
+      if (updated) {
+        localStorage.setItem('asap_user', JSON.stringify(updated));
+      }
+      return updated;
+    });
   };
 
   return (
@@ -94,7 +212,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         darkMode,
         toggleDarkMode,
+        institucionActiva,
+        instituciones,
+        setInstitucionActiva,
         login,
+        loginWithGoogle,
         logout,
         updateUser
       }}

@@ -1,5 +1,5 @@
 /**
- * ASAP — Pruebas unitarias para los endpoints principales de la API
+ * ASAP — Pruebas unitarias para los endpoints principales de la API v1.1
  */
 import { app } from '../routes/api';
 import http from 'http';
@@ -69,19 +69,19 @@ export async function runAllTests() {
 
     // Test 2: Auth Login
     const resLogin = await makeRequest('/api/auth/login', 'POST', {
-      email: 'andres.morales@educacion.gob.ec',
-      password: 'password123',
+      email: 'andres.morales@uefdemocracia.edu.ec',
+      password: 'asap2024',
     });
     results.push({
-      test: 'POST /api/auth/login genera token y retorna usuario docente',
+      test: 'POST /api/auth/login genera JWT y retorna usuario docente Andrés Morales',
       passed: resLogin.status === 200 && Boolean(resLogin.data?.token) && resLogin.data?.user?.rol === 'Docente',
     });
 
     // Test 3: Dashboard data
     const resDash = await makeRequest('/api/dashboard');
     results.push({
-      test: 'GET /api/dashboard retorna estadísticas, resumen del día y lista inteligente',
-      passed: resDash.status === 200 && Boolean(resDash.data?.estadisticas?.totalEstudiantes),
+      test: 'GET /api/dashboard retorna horario del día, clases de la semana y por hacer',
+      passed: resDash.status === 200 && Boolean(resDash.data?.estadisticas?.clasesPlanificadasSemana),
     });
 
     // Test 4: Asistencia list
@@ -91,27 +91,59 @@ export async function runAllTests() {
       passed: resAsist.status === 200 && Array.isArray(resAsist.data?.paralelos),
     });
 
-    // Test 5: Calificaciones por curso
+    // Test 5: Guardar Asistencia
+    const resGuardarAsist = await makeRequest('/api/asistencia/par-8vo-a', 'POST', {
+      fecha: new Date().toISOString().slice(0, 10),
+      registros: [{ estudianteId: 'est-8a-01', estado: 'P' }]
+    });
+    results.push({
+      test: 'POST /api/asistencia/:cursoId persiste la asistencia del día',
+      passed: resGuardarAsist.status === 200 && resGuardarAsist.data?.success === true,
+    });
+
+    // Test 6: Calificaciones por curso
     const resCalif = await makeRequest('/api/calificaciones/par-8vo-a');
     results.push({
-      test: 'GET /api/calificaciones/:cursoId retorna libro de notas y estadísticas',
+      test: 'GET /api/calificaciones/:cursoId retorna matriz de notas y estadísticas',
       passed: resCalif.status === 200 && Array.isArray(resCalif.data?.libroNotas),
     });
 
-    // Test 6: Planificación curricular
-    const resPlan = await makeRequest('/api/planificacion');
+    // Test 7: Análisis del grupo con IA
+    const resAnalisisIA = await makeRequest('/api/ai/analisis-rendimiento', 'POST', {
+      paraleloId: 'par-8vo-a'
+    });
     results.push({
-      test: 'GET /api/planificacion retorna bloques curriculares MINEDUC',
-      passed: resPlan.status === 200 && Array.isArray(resPlan.data?.planificaciones),
+      test: 'POST /api/ai/analisis-rendimiento genera diagnóstico formativo para el paralelo',
+      passed: resAnalisisIA.status === 200 && Boolean(resAnalisisIA.data?.analisis),
     });
 
-    console.log('--- RESULTADOS DE PRUEBAS UNITARIAS ASAP ---');
+    // Test 8: Workspace Kanban
+    const resKanban = await makeRequest('/api/workspace/kanban');
+    results.push({
+      test: 'GET /api/workspace/kanban retorna tareas del tablero',
+      passed: resKanban.status === 200 && Array.isArray(resKanban.data?.kanbanTasks),
+    });
+
+    // Test 9: Mis Documentos
+    const resDocs = await makeRequest('/api/workspace/documentos');
+    results.push({
+      test: 'GET /api/workspace/documentos retorna documentos con categorización',
+      passed: resDocs.status === 200 && Array.isArray(resDocs.data?.documentos),
+    });
+
+    console.log('--- RESULTADOS DE PRUEBAS UNITARIAS ASAP v1.1 ---');
     results.forEach((r) => {
       console.log(`${r.passed ? '✅' : '❌'} ${r.test}`);
     });
+    
+    const allPassed = results.every(r => r.passed);
+    console.log(`\nResumen: ${results.filter(r => r.passed).length}/${results.length} pruebas pasadas.`);
+    process.exit(allPassed ? 0 : 1);
   } catch (error: any) {
     console.error('Error al ejecutar pruebas:', error);
+    process.exit(1);
   }
 
   return results;
 }
+

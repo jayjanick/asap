@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PLANIFICACIONES_MINEDUC, PlanificacionUnidad } from '../data/mockData';
-import { Card, Button, Badge } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Drawer } from '../components/ui/Dialogs';
 import {
   BookOpenCheck,
@@ -111,13 +111,13 @@ export const PlanificacionPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800 gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <BookOpenCheck className="w-6 h-6 text-[#176087] dark:text-[#9ED8ED]" />
-            Módulo de Planificación Curricular
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Alineado al Currículo Nacional del Ministerio de Educación del Ecuador (MINEDUC).
-          </p>
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+              Planificación Curricular
+            </h2>
+            <InfoTooltip content="Unidades microcurriculares PUD alineadas al Currículo Nacional del Ministerio de Educación del Ecuador (MINEDUC) con asistencia de Gemini." />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

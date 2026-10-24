@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for asap, an educational platform for Ecuadorian public school teachers featuring daily dashboard, AI lesson planning, attendance tracking, grading book, teacher workspace, corporate landing page, Express backend with Gemini AI integration, and Mongoose/MongoDB schemas matching the ERD.",
-  "updatedAt":  "2026-10-24T03:46:30.335072975Z",
+  "summary":  "Plan de correcciones integrales v1.1 para la plataforma educativa asap: persistencia Mongoose con fallback transparente en memoria, resolución de rutas y 404 en GitHub Pages con base /asap/, autenticación Google OAuth simulada y JWT persistente con revalidación /api/auth/me, persistencia real de asistencia, exportaciones CSV/XLSX/PDF/DOCX, editor de plantillas enriquecido, rediseño UX sin subtítulos excesivos con tooltips Info, Kanban con @dnd-kit, animaciones fluidas con Motion, y expansión de configuraciones de docente.",
+  "updatedAt":  "2026-10-24T08:39:01.833398080Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

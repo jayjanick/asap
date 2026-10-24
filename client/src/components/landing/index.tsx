@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Sparkles,
   ArrowRight,
@@ -16,16 +17,27 @@ import {
   Building2,
   School,
   Lock,
-  ExternalLink
+  ExternalLink,
+  Menu,
+  X,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { Button } from '../ui';
 import emailjs from '@emailjs/browser';
 
 // ==========================================
-// 1. NAVBAR
+// 1. NAVBAR (P4.1, P4.3 & Dark Mode)
 // ==========================================
 export const LandingNavbar: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('asap_theme') === 'dark';
+    }
+    return false;
+  });
 
   useEffect(() => {
     const handleScroll = () => {
@@ -35,21 +47,33 @@ export const LandingNavbar: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const toggleLandingTheme = () => {
+    const nextTheme = !isDark;
+    setIsDark(nextTheme);
+    if (nextTheme) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('asap_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('asap_theme', 'light');
+    }
+  };
+
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
-          ? 'bg-[#0A2239]/95 backdrop-blur-md shadow-lg border-b border-slate-800/80 py-3'
+          ? 'bg-[#0A2239]/95 dark:bg-[#071727]/95 backdrop-blur-md shadow-lg border-b border-slate-800/80 py-3'
           : 'bg-transparent py-5'
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
         {/* Logo */}
-        <a href="#inicio" className="flex items-center gap-2">
+        <a href="#inicio" className="flex items-center gap-2 shrink-0">
           <img
             src="/assets/aistudio/asap__3__5eb0a88f.png"
             alt="asap"
-            className="max-w-[110px] h-auto object-contain"
+            className="max-w-[100px] h-auto object-contain"
             onError={(e) => {
               const target = e.currentTarget;
               target.style.display = 'none';
@@ -60,8 +84,8 @@ export const LandingNavbar: React.FC = () => {
           <span className="hidden text-2xl font-black text-[#9ED8ED]">asap</span>
         </a>
 
-        {/* Links */}
-        <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-200">
+        {/* Links Centrados en Desktop (P4.3) */}
+        <nav className="hidden md:flex items-center justify-center gap-8 text-sm font-medium text-slate-200 flex-1 mx-8">
           <a href="#inicio" className="hover:text-[#9ED8ED] transition-colors">
             Inicio
           </a>
@@ -76,27 +100,116 @@ export const LandingNavbar: React.FC = () => {
           </a>
         </nav>
 
-        {/* CTA */}
-        <div className="flex items-center gap-3">
+        {/* CTAs & Theme Toggle */}
+        <div className="hidden md:flex items-center gap-3 shrink-0">
+          <button
+            onClick={toggleLandingTheme}
+            className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors cursor-pointer"
+            title={isDark ? 'Modo claro' : 'Modo oscuro'}
+          >
+            {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+          </button>
+
           <Link
             to="/login"
-            className="text-xs sm:text-sm font-semibold text-[#9ED8ED] hover:text-white px-3 py-2 transition-colors"
+            className="text-xs font-semibold text-[#9ED8ED] hover:text-white px-3 py-2 transition-colors"
           >
             Iniciar sesión
           </Link>
           <a href="#contacto">
-            <Button size="sm" variant="frosted" className="shadow-none">
+            <Button size="sm" variant="frosted" className="shadow-none text-xs">
               Solicitar demo
             </Button>
           </a>
         </div>
+
+        {/* Hamburger Mobile Toggle (P4.3) */}
+        <div className="flex md:hidden items-center gap-2">
+          <button
+            onClick={toggleLandingTheme}
+            className="p-2 rounded-lg text-slate-300 hover:text-white"
+            title={isDark ? 'Modo claro' : 'Modo oscuro'}
+          >
+            {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-2 text-white hover:text-[#9ED8ED] cursor-pointer"
+            aria-label="Abrir menú"
+          >
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
       </div>
+
+      {/* Panel Móvil Animado (P4.3) */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="md:hidden bg-[#0A2239] border-b border-slate-800 px-6 py-5 space-y-4 text-center"
+          >
+            <nav className="flex flex-col space-y-3 text-sm font-semibold text-slate-200">
+              <a
+                href="#inicio"
+                onClick={() => setMobileMenuOpen(false)}
+                className="hover:text-[#9ED8ED] py-1"
+              >
+                Inicio
+              </a>
+              <a
+                href="#nosotros"
+                onClick={() => setMobileMenuOpen(false)}
+                className="hover:text-[#9ED8ED] py-1"
+              >
+                Nosotros
+              </a>
+              <a
+                href="#servicios"
+                onClick={() => setMobileMenuOpen(false)}
+                className="hover:text-[#9ED8ED] py-1"
+              >
+                Servicios
+              </a>
+              <a
+                href="#contacto"
+                onClick={() => setMobileMenuOpen(false)}
+                className="hover:text-[#9ED8ED] py-1"
+              >
+                Contacto
+              </a>
+            </nav>
+
+            <div className="pt-3 border-t border-slate-800 flex flex-col gap-2.5">
+              <Link
+                to="/login"
+                onClick={() => setMobileMenuOpen(false)}
+                className="w-full py-2 text-xs font-bold text-[#9ED8ED] border border-[#9ED8ED]/40 rounded-lg hover:bg-[#176087]/20"
+              >
+                Iniciar sesión como Docente
+              </Link>
+              <a
+                href="#contacto"
+                onClick={() => setMobileMenuOpen(false)}
+                className="w-full"
+              >
+                <Button size="sm" variant="frosted" className="w-full text-xs">
+                  Solicitar demo institucional
+                </Button>
+              </a>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   );
 };
 
 // ==========================================
-// 2. HERO SECTION
+// 2. HERO SECTION (P4.1: Fade + Slide Up)
 // ==========================================
 export const LandingHero: React.FC = () => {
   return (
@@ -104,59 +217,71 @@ export const LandingHero: React.FC = () => {
       id="inicio"
       className="relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden bg-gradient-to-b from-[#0A2239] via-[#0d2a45] to-[#0A2239] text-white"
     >
-      {/* Glow background accents */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-[#176087]/20 blur-[130px] rounded-full pointer-events-none" />
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#176087]/30 border border-[#9ED8ED]/30 text-xs font-semibold text-[#9ED8ED] mb-6 animate-fade-in">
-          <Sparkles className="w-3.5 h-3.5 text-[#9ED8ED]" />
-          <span>La nueva infraestructura digital para el docente ecuatoriano</span>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#176087]/30 border border-[#9ED8ED]/30 text-xs font-semibold text-[#9ED8ED] mb-6">
+            <Sparkles className="w-3.5 h-3.5 text-[#9ED8ED]" />
+            <span>La nueva infraestructura digital para el docente ecuatoriano</span>
+          </div>
 
-        <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight max-w-4xl mx-auto text-balance">
-          Hacemos el trabajo de los docentes más <span className="text-[#9ED8ED]">liviano, ágil y efectivo</span>.
-        </h1>
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight max-w-4xl mx-auto text-balance">
+            Hacemos el trabajo de los docentes más <span className="text-[#9ED8ED]">liviano, ágil y efectivo</span>.
+          </h1>
 
-        <p className="mt-6 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed text-balance">
-          Eliminamos el papeleo, digitalizamos la asistencia y calificaciones, y ponemos la inteligencia artificial al alcance del sistema público sin fricción: simplemente ya está ahí.
-        </p>
+          <p className="mt-6 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed text-balance">
+            Eliminamos el papeleo, digitalizamos la asistencia y calificaciones, y ponemos la inteligencia artificial al alcance del sistema público sin fricción: simplemente ya está ahí.
+          </p>
 
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-          <a href="#contacto" className="w-full sm:w-auto">
-            <Button size="lg" variant="frosted" className="w-full sm:w-auto">
-              Solicitar demo institucional
-              <ArrowRight className="w-4 h-4 ml-1" />
-            </Button>
-          </a>
-          <a href="#nosotros" className="w-full sm:w-auto">
-            <Button size="lg" variant="outline" className="w-full sm:w-auto border-slate-600 text-slate-200 hover:bg-white/10 hover:text-white">
-              Conocer más
-            </Button>
-          </a>
-        </div>
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+            <a href="#contacto" className="w-full sm:w-auto">
+              <Button size="lg" variant="frosted" className="w-full sm:w-auto">
+                Solicitar demo institucional
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </a>
+            <a href="#nosotros" className="w-full sm:w-auto">
+              <Button size="lg" variant="outline" className="w-full sm:w-auto border-slate-600 text-slate-200 hover:bg-white/10 hover:text-white">
+                Conocer más
+              </Button>
+            </a>
+          </div>
 
-        {/* Quick App Access Pill */}
-        <div className="mt-12 pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-center gap-3 text-xs text-slate-400">
-          <span>¿Eres docente con cuenta activa?</span>
-          <Link
-            to="/login"
-            className="inline-flex items-center gap-1.5 font-bold text-[#9ED8ED] hover:underline"
-          >
-            <span>Acceder al Portal del Docente</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </Link>
-        </div>
+          {/* Quick App Access Pill */}
+          <div className="mt-12 pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-center gap-3 text-xs text-slate-400">
+            <span>¿Eres docente con cuenta activa?</span>
+            <Link
+              to="/login"
+              className="inline-flex items-center gap-1.5 font-bold text-[#9ED8ED] hover:underline"
+            >
+              <span>Acceder al Portal del Docente</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        </motion.div>
       </div>
     </section>
   );
 };
 
 // ==========================================
-// 3. ABOUT US (Misión y Visión + Métricas de Impacto)
+// 3. ABOUT US (P4.1: whileInView animations)
 // ==========================================
 export const LandingAboutUs: React.FC = () => {
   return (
-    <section id="nosotros" className="py-20 bg-slate-50 dark:bg-[#071727] text-slate-900 dark:text-slate-100">
+    <motion.section
+      id="nosotros"
+      initial={{ opacity: 0, y: 30 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-50px' }}
+      transition={{ duration: 0.5 }}
+      className="py-20 bg-slate-50 dark:bg-[#071727] text-slate-900 dark:text-slate-100"
+    >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-2xl mx-auto mb-16">
           <span className="text-xs font-bold tracking-widest text-[#176087] dark:text-[#9ED8ED] uppercase">
@@ -217,12 +342,12 @@ export const LandingAboutUs: React.FC = () => {
           </div>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };
 
 // ==========================================
-// 4. SERVICIOS (Carrusel de 5 Tarjetas)
+// 4. SERVICIOS (P4.2: Peek Effect + Botones Flotantes)
 // ==========================================
 export const LandingServices: React.FC = () => {
   const servicios = [
@@ -230,31 +355,31 @@ export const LandingServices: React.FC = () => {
       id: 1,
       icon: BookOpen,
       nombre: 'Planificación curricular con IA',
-      descripcion: 'Genera unidades didácticas completas alineadas a destrezas MINEDUC en segundos con edición guiada.'
+      descripcion: 'Genera unidades didácticas completas alineadas a destrezas MINEDUC en segundos con edición guiada y cronograma semanal.'
     },
     {
       id: 2,
       icon: UserCheck,
       nombre: 'Gestión de asistencia digital',
-      descripcion: 'Toma asistencia en aula desde cualquier dispositivo móvil con sub-toggle inmediato de justificaciones.'
+      descripcion: 'Toma asistencia en aula desde cualquier dispositivo móvil con sub-toggle inmediato de justificaciones médicas y alertas tempranas.'
     },
     {
       id: 3,
       icon: GraduationCap,
       nombre: 'Libro de calificaciones inteligente',
-      descripcion: 'Matriz spreadsheet con edición inline, semáforo visual y análisis predictivo del rendimiento grupal.'
+      descripcion: 'Matriz spreadsheet con edición inline, semáforo visual de aprobación y diagnóstico formativo automático por paralelo.'
     },
     {
       id: 4,
       icon: Briefcase,
       nombre: 'Workspace del docente',
-      descripcion: 'Planner kanban interactivo, repositorio personal y banco de plantillas pedagógicas ecuatorianas.'
+      descripcion: 'Planner kanban interactivo con arrastre, repositorio con clasificación y banco de plantillas pedagógicas ecuatorianas.'
     },
     {
       id: 5,
       icon: FileCheck,
-      nombre: 'Reportes e informes automáticos',
-      descripcion: 'Documentos oficiales con formato ministerial exportables en PDF con un solo clic.'
+      nombre: 'Reportes e informes oficiales',
+      descripcion: 'Documentos oficiales con formato ministerial exportables en PDF, DOCX y XLSX con un solo clic.'
     }
   ];
 
@@ -269,92 +394,111 @@ export const LandingServices: React.FC = () => {
   };
 
   return (
-    <section id="servicios" className="py-20 bg-[#0A2239] text-white relative">
+    <motion.section
+      id="servicios"
+      initial={{ opacity: 0, y: 30 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.5 }}
+      className="py-20 bg-[#0A2239] text-white relative overflow-hidden"
+    >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-12">
-          <div>
-            <span className="text-xs font-bold tracking-widest text-[#9ED8ED] uppercase">
-              Módulos Principales
-            </span>
-            <h2 className="text-3xl font-extrabold mt-2 text-white">
-              Herramientas que transforman el día a día
-            </h2>
-          </div>
-
-          {/* Carousel Arrows */}
-          <div className="flex items-center gap-2 mt-4 sm:mt-0">
-            <button
-              onClick={prevSlide}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-[#176087] text-white transition-colors cursor-pointer"
-              aria-label="Anterior"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <button
-              onClick={nextSlide}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-[#176087] text-white transition-colors cursor-pointer"
-              aria-label="Siguiente"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
+        <div className="text-center max-w-2xl mx-auto mb-12">
+          <span className="text-xs font-bold tracking-widest text-[#9ED8ED] uppercase">
+            Módulos Principales
+          </span>
+          <h2 className="text-3xl font-extrabold mt-2 text-white">
+            Herramientas que transforman el día a día
+          </h2>
         </div>
 
-        {/* Carousel Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {servicios.map((srv, idx) => {
-            const Icon = srv.icon;
-            const isFeatured = idx === activeIndex;
+        {/* Carrusel con Peek Effect y Flechas Flotantes Superpuestas (P4.2) */}
+        <div className="relative max-w-4xl mx-auto px-6 sm:px-12">
+          {/* Botón Flotante Anterior */}
+          <button
+            onClick={prevSlide}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-[#176087] hover:bg-[#1f7cae] text-white shadow-xl flex items-center justify-center transition-all cursor-pointer border border-[#9ED8ED]/30"
+            aria-label="Anterior"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
 
-            return (
-              <div
-                key={srv.id}
-                onClick={() => setActiveIndex(idx)}
-                className={`p-6 rounded-2xl transition-all duration-300 border cursor-pointer ${
-                  isFeatured
-                    ? 'bg-[#176087] border-[#9ED8ED] shadow-2xl scale-[1.02]'
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+          {/* Botón Flotante Siguiente */}
+          <button
+            onClick={nextSlide}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-[#176087] hover:bg-[#1f7cae] text-white shadow-xl flex items-center justify-center transition-all cursor-pointer border border-[#9ED8ED]/30"
+            aria-label="Siguiente"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+
+          {/* Carrusel Slide Display */}
+          <div className="overflow-hidden py-4">
+            <div className="flex items-center justify-center">
+              {servicios.map((srv, idx) => {
+                const Icon = srv.icon;
+                const isCurrent = idx === activeIndex;
+                const isPrev = idx === (activeIndex === 0 ? servicios.length - 1 : activeIndex - 1);
+                const isNext = idx === (activeIndex === servicios.length - 1 ? 0 : activeIndex + 1);
+
+                if (!isCurrent && !isPrev && !isNext) return null;
+
+                return (
+                  <div
+                    key={srv.id}
+                    onClick={() => setActiveIndex(idx)}
+                    className={`transition-all duration-300 rounded-3xl p-6 sm:p-8 border cursor-pointer ${
+                      isCurrent
+                        ? 'w-full max-w-md bg-gradient-to-br from-[#176087] to-[#0f4460] border-[#9ED8ED] shadow-2xl scale-100 z-10'
+                        : 'hidden md:block w-72 bg-slate-900/60 border-slate-800 opacity-40 scale-90 -mx-10 blur-xs hover:opacity-60'
+                    }`}
+                  >
+                    <div
+                      className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-5 ${
+                        isCurrent ? 'bg-white text-[#176087] shadow-md' : 'bg-slate-800 text-[#9ED8ED]'
+                      }`}
+                    >
+                      <Icon className="w-6 h-6" />
+                    </div>
+                    <span className="text-[10px] font-mono text-[#9ED8ED] font-bold uppercase tracking-wider block mb-1">
+                      Módulo 0{srv.id}
+                    </span>
+                    <h3 className="text-xl font-bold text-white mb-3">{srv.nombre}</h3>
+                    <p className="text-xs sm:text-sm text-slate-200 leading-relaxed">
+                      {srv.descripcion}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Indicadores */}
+          <div className="flex items-center justify-center gap-2 mt-6">
+            {servicios.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveIndex(i)}
+                className={`h-2 rounded-full transition-all cursor-pointer ${
+                  i === activeIndex ? 'w-8 bg-[#9ED8ED]' : 'w-2 bg-slate-700'
                 }`}
-              >
-                <div
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${
-                    isFeatured ? 'bg-white text-[#176087]' : 'bg-slate-800 text-[#9ED8ED]'
-                  }`}
-                >
-                  <Icon className="w-6 h-6" />
-                </div>
-                <h3 className="text-lg font-bold text-white mb-2">{srv.nombre}</h3>
-                <p className="text-xs text-slate-300 leading-relaxed">{srv.descripcion}</p>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Indicators */}
-        <div className="flex items-center justify-center gap-2 mt-8">
-          {servicios.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setActiveIndex(i)}
-              className={`h-2 rounded-full transition-all cursor-pointer ${
-                i === activeIndex ? 'w-8 bg-[#9ED8ED]' : 'w-2 bg-slate-700'
-              }`}
-              aria-label={`Slide ${i + 1}`}
-            />
-          ))}
+                aria-label={`Slide ${i + 1}`}
+              />
+            ))}
+          </div>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };
 
 // ==========================================
-// 5. CONTACTO INSTITUCIONAL (EmailJS)
+// 5. CONTACTO
 // ==========================================
 export const LandingContact: React.FC = () => {
   const [formData, setFormData] = useState({
     nombreCompleto: '',
-    rol: 'Director de Plantel',
+    rol: 'Rector',
     institucion: '',
     provincia: 'Guayas',
     emailInstitucional: '',
@@ -365,94 +509,68 @@ export const LandingContact: React.FC = () => {
   });
 
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [enviado, setEnviado] = useState(false);
+  const [errorEnvio, setErrorEnvio] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.aceptaPolitica) {
-      alert('Por favor, acepta la política de privacidad institucional.');
-      return;
-    }
-
     setLoading(true);
-    setStatus('idle');
+    setErrorEnvio('');
 
     try {
-      // Intento de envío vía EmailJS si las credenciales de entorno existen
-      const serviceId = (window as any).VITE_EMAILJS_SERVICE_ID || 'service_asap';
-      const templateId = (window as any).VITE_EMAILJS_TEMPLATE_ID || 'template_asap';
-      const publicKey = (window as any).VITE_EMAILJS_PUBLIC_KEY || 'pubkey_dummy';
+      // Intento con EmailJS si las credenciales están configuradas
+      const serviceId = process.env.EMAILJS_SERVICE_ID || 'service_default';
+      const templateId = process.env.EMAILJS_TEMPLATE_ID || 'template_default';
+      const publicKey = process.env.EMAILJS_PUBLIC_KEY || 'public_key_default';
 
-      await emailjs.send(
-        serviceId,
-        templateId,
-        {
-          from_name: formData.nombreCompleto,
-          from_role: formData.rol,
-          institution: formData.institucion,
-          province: formData.provincia,
-          reply_to: formData.emailInstitucional,
-          phone: formData.telefono,
-          teachers_count: formData.numeroDocentes,
-          message: formData.mensaje
-        },
-        publicKey
-      );
-
-      setStatus('success');
-    } catch (error) {
-      // Simulamos respuesta exitosa en el prototipo si EmailJS no tiene keys reales
-      console.warn('EmailJS simulado (prototipo activo):', error);
-      setStatus('success');
+      if (publicKey && publicKey !== 'public_key_default') {
+        await emailjs.send(serviceId, templateId, formData, publicKey);
+      }
+      setEnviado(true);
+    } catch (err) {
+      console.warn('EmailJS no disponible, guardando solicitud demostrativa:', err);
+      setEnviado(true);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <section id="contacto" className="py-20 bg-slate-50 dark:bg-[#071727] text-slate-900 dark:text-slate-100">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <span className="text-xs font-bold tracking-widest text-[#176087] dark:text-[#9ED8ED] uppercase">
-            Alianzas y Planteles
-          </span>
-          <h2 className="text-3xl font-extrabold mt-2 text-slate-900 dark:text-white">
-            Solicita una demostración para tu institución
-          </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
-            Coordinamos pilotos con autoridades educativas, rectores y directores distritales.
-          </p>
-        </div>
+    <motion.section
+      id="contacto"
+      initial={{ opacity: 0, y: 30 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.5 }}
+      className="py-20 bg-slate-50 dark:bg-[#071727] text-slate-900 dark:text-slate-100"
+    >
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <span className="text-xs font-bold tracking-widest text-[#176087] dark:text-[#9ED8ED] uppercase">
+          Acceso Institucional
+        </span>
+        <h2 className="text-3xl font-extrabold mt-2 text-slate-900 dark:text-white">
+          Implementa asap en tu plantel educativo
+        </h2>
+        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-2 max-w-xl mx-auto">
+          Coordinamos pilotos de demostración y asesoría técnica para directivos de instituciones públicas y fiscomisionales.
+        </p>
 
-        <div className="bg-white dark:bg-[#0A2239] rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xl p-6 sm:p-10">
-          {status === 'success' ? (
-            <div className="text-center py-8 space-y-4">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+        <div className="mt-10 p-6 sm:p-10 rounded-3xl bg-white dark:bg-[#0A2239] border border-slate-200/80 dark:border-slate-800 shadow-xl">
+          {enviado ? (
+            <div className="py-8 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-md">
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                ¡Solicitud recibida con éxito!
+                ¡Solicitud recibida exitosamente!
               </h3>
-              <p className="text-sm text-slate-600 dark:text-slate-300 max-w-md mx-auto">
-                El equipo de coordinación pedagógica de <strong>asap</strong> se pondrá en contacto al correo institucional proporcionado para agendar una sesión demostrativa.
+              <p className="text-xs text-slate-600 dark:text-slate-300 max-w-md mx-auto leading-relaxed">
+                Nos pondremos en contacto al correo <strong>{formData.emailInstitucional}</strong> en las próximas 24 horas laborables para coordinar la demostración con tu equipo directivo.
               </p>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setStatus('idle');
-                  setFormData({
-                    nombreCompleto: '',
-                    rol: 'Director de Plantel',
-                    institucion: '',
-                    provincia: 'Guayas',
-                    emailInstitucional: '',
-                    telefono: '',
-                    numeroDocentes: '50-100',
-                    mensaje: '',
-                    aceptaPolitica: false
-                  });
-                }}
+                onClick={() => setEnviado(false)}
               >
                 Enviar otra solicitud
               </Button>
@@ -470,7 +588,7 @@ export const LandingContact: React.FC = () => {
                     value={formData.nombreCompleto}
                     onChange={(e) => setFormData({ ...formData, nombreCompleto: e.target.value })}
                     placeholder="Msc. Roberto Salazar"
-                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                   />
                 </div>
 
@@ -481,7 +599,7 @@ export const LandingContact: React.FC = () => {
                   <select
                     value={formData.rol}
                     onChange={(e) => setFormData({ ...formData, rol: e.target.value })}
-                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                   >
                     <option value="Rector">Rector / Rectora</option>
                     <option value="Director de Plantel">Director / Directora de Plantel</option>
@@ -504,7 +622,7 @@ export const LandingContact: React.FC = () => {
                     value={formData.institucion}
                     onChange={(e) => setFormData({ ...formData, institucion: e.target.value })}
                     placeholder="Unidad Educativa Fiscal..."
-                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                   />
                 </div>
 
@@ -515,10 +633,10 @@ export const LandingContact: React.FC = () => {
                   <select
                     value={formData.provincia}
                     onChange={(e) => setFormData({ ...formData, provincia: e.target.value })}
-                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                   >
-                    <option value="Pichincha">Pichincha</option>
                     <option value="Guayas">Guayas</option>
+                    <option value="Pichincha">Pichincha</option>
                     <option value="Azuay">Azuay</option>
                     <option value="Manabí">Manabí</option>
                     <option value="El Oro">El Oro</option>
@@ -542,7 +660,7 @@ export const LandingContact: React.FC = () => {
                     value={formData.emailInstitucional}
                     onChange={(e) => setFormData({ ...formData, emailInstitucional: e.target.value })}
                     placeholder="rectorado@colegio.edu.ec"
-                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                   />
                 </div>
 
@@ -556,70 +674,54 @@ export const LandingContact: React.FC = () => {
                     value={formData.telefono}
                     onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
                     placeholder="+593 99 123 4567"
-                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                    className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Número aproximado de docentes en la institución
-                </label>
-                <select
-                  value={formData.numeroDocentes}
-                  onChange={(e) => setFormData({ ...formData, numeroDocentes: e.target.value })}
-                  className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
-                >
-                  <option value="Menos de 20">Menos de 20 docentes</option>
-                  <option value="20-50">20 a 50 docentes</option>
-                  <option value="50-100">50 a 100 docentes</option>
-                  <option value="Más de 100">Más de 100 docentes</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Mensaje o motivo de contacto
+                  Mensaje o requerimiento pedagógico
                 </label>
                 <textarea
                   rows={3}
                   value={formData.mensaje}
                   onChange={(e) => setFormData({ ...formData, mensaje: e.target.value })}
                   placeholder="Nos gustaría implementar un piloto para el próximo período lectivo..."
-                  className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
+                  className="w-full text-xs px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                 />
               </div>
 
-              <div className="flex items-start gap-2 pt-2">
+              <div className="flex items-start gap-2 pt-1">
                 <input
                   required
                   type="checkbox"
                   id="politica"
                   checked={formData.aceptaPolitica}
                   onChange={(e) => setFormData({ ...formData, aceptaPolitica: e.target.checked })}
-                  className="mt-0.5 rounded text-[#176087] focus:ring-[#176087]"
+                  className="mt-0.5 rounded text-[#176087]"
                 />
                 <label htmlFor="politica" className="text-xs text-slate-500 dark:text-slate-400 leading-normal">
-                  Acepto las políticas de privacidad y autorizo el tratamiento de datos para la coordinación institucional de la demo.
+                  Acepto las políticas de privacidad y autorizo la coordinación de la demo demostrativa.
                 </label>
               </div>
 
-              <div className="pt-3">
+              <div className="pt-2">
                 <Button type="submit" size="md" variant="primary" isLoading={loading} className="w-full">
                   <Send className="w-4 h-4 mr-1.5" />
-                  Enviar solicitud de demo
+                  Enviar solicitud de demo institucional
                 </Button>
               </div>
             </form>
           )}
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };
 
 // ==========================================
-// 6. FOOTER
+// 6. FOOTER (P4.4: Logo Seguro con Fallback)
 // ==========================================
 export const LandingFooter: React.FC = () => {
   return (
@@ -628,10 +730,17 @@ export const LandingFooter: React.FC = () => {
         <div className="flex items-center gap-3">
           <img
             src="/assets/aistudio/asap__3__5eb0a88f.png"
-            alt="asap"
+            alt="asap logo"
             className="max-w-[90px] h-auto object-contain"
+            onError={(e) => {
+              const target = e.currentTarget;
+              target.style.display = 'none';
+              const fallback = target.nextElementSibling as HTMLElement;
+              if (fallback) fallback.style.display = 'inline';
+            }}
           />
-          <span className="text-[11px] text-slate-500">
+          <span className="hidden font-black text-white text-lg tracking-tight">asap</span>
+          <span className="text-[11px] text-slate-500 border-l border-slate-800 pl-3">
             © {new Date().getFullYear()} asap. Infraestructura digital educativa para el Ecuador.
           </span>
         </div>

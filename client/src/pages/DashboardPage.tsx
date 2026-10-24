@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import {
   Calendar,
@@ -17,29 +17,40 @@ import {
   TrendingUp,
   FileText,
   Users,
-  Compass
+  Compass,
+  AlertTriangle
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
-  const { user } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { user, institucionActiva } = useAuth();
+  const [searchParams] = useSearchParams();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
-  const [nuevaTareaTexto, setNuevaTareaTexto] = useState('');
+
+  // Formulario de tarea con urgencia, fecha límite y observaciones (P3.2)
+  const [nuevaTareaTitulo, setNuevaTareaTitulo] = useState('');
+  const [nuevaTareaUrgencia, setNuevaTareaUrgencia] = useState<'Alta' | 'Media' | 'Baja'>('Media');
+  const [nuevaTareaFecha, setNuevaTareaFecha] = useState('');
+  const [nuevaTareaObs, setNuevaTareaObs] = useState('');
+  const [showTaskForm, setShowTaskForm] = useState(false);
 
   const [todoList, setTodoList] = useState([
     {
       id: 't-1',
       titulo: 'Tomar asistencia de 9no EGB "B" (Jornada matutina)',
-      urgencia: 'alta',
+      urgencia: 'Alta',
+      fechaLimite: '2026-10-24',
+      observaciones: 'Reportar ausencias reiteradas a Inspección General.',
       modulo: 'Asistencia',
       link: '/asistencia/par-9no-b',
       completada: false
     },
     {
       id: 't-2',
-      titulo: 'Calificar 4 micro-crónicas barriales pendientes en 8vo A',
-      urgencia: 'media',
+      titulo: 'Calificar 5 micro-crónicas barriales en 8vo A',
+      urgencia: 'Alta',
+      fechaLimite: '2026-10-25',
+      observaciones: 'Verificar rúbrica de conectores lógicos y ortografía.',
       modulo: 'Calificaciones',
       link: '/calificaciones',
       completada: false
@@ -47,26 +58,66 @@ export const DashboardPage: React.FC = () => {
     {
       id: 't-3',
       titulo: 'Planificar Bloque 3: Textos Periodísticos con asistencia IA',
-      urgencia: 'media',
+      urgencia: 'Media',
+      fechaLimite: '2026-10-29',
+      observaciones: 'Alinear a DCD del currículo priorizado MINEDUC.',
       modulo: 'Planificación',
       link: '/planificacion',
       completada: false
     },
     {
       id: 't-4',
-      titulo: 'Entregar reporte consolidado de asistencia a Inspección General',
-      urgencia: 'baja',
+      titulo: 'Descargar actas de calificaciones y firmas de representantes',
+      urgencia: 'Baja',
+      fechaLimite: '2026-10-31',
+      observaciones: 'Archivo en carpeta de secretaría del plantel.',
       modulo: 'Workspace',
       link: '/workspace',
       completada: false
     }
   ]);
 
+  // Cálculo de hora en tiempo real para determinar clase en curso
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     if (searchParams.get('onboarding') === 'true') {
       setShowOnboarding(true);
     }
   }, [searchParams]);
+
+  const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+
+  // Horario del docente Andrés Morales:
+  // 07:15 (435m) a 08:45 (525m): 8vo A
+  // 08:45 (525m) a 10:00 (600m): 9no B
+  // 10:00 a 10:30: Receso
+  // 10:30 a 11:45: Refuerzo / Tutoría
+  let claseEnCurso = null;
+  if (currentMinutes >= 435 && currentMinutes < 525) {
+    claseEnCurso = {
+      paralelo: '8vo EGB "A"',
+      materia: 'Lengua y Literatura',
+      aula: 'Aula 204 · Bloque B',
+      horario: '07:15 - 08:45',
+      tema: 'Estructura del ensayo y conectores argumentativos',
+      link: '/asistencia/par-8vo-a'
+    };
+  } else if (currentMinutes >= 525 && currentMinutes < 600) {
+    claseEnCurso = {
+      paralelo: '9no EGB "B"',
+      materia: 'Lengua y Literatura',
+      aula: 'Aula 102 · Bloque C',
+      horario: '08:45 - 10:00',
+      tema: 'Métrica y recursos estilísticos en la poesía lírica',
+      link: '/asistencia/par-9no-b'
+    };
+  }
 
   const handleToggleTodo = (id: string) => {
     setTodoList(
@@ -76,27 +127,57 @@ export const DashboardPage: React.FC = () => {
 
   const handleAddTarea = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevaTareaTexto.trim()) return;
+    if (!nuevaTareaTitulo.trim()) return;
+
     setTodoList([
       {
         id: `t-${Date.now()}`,
-        titulo: nuevaTareaTexto.trim(),
-        urgencia: 'media',
+        titulo: nuevaTareaTitulo.trim(),
+        urgencia: nuevaTareaUrgencia,
+        fechaLimite: nuevaTareaFecha || new Date().toISOString().slice(0, 10),
+        observaciones: nuevaTareaObs.trim(),
         modulo: 'Personal',
         link: '/workspace',
         completada: false
       },
       ...todoList
     ]);
-    setNuevaTareaTexto('');
+
+    setNuevaTareaTitulo('');
+    setNuevaTareaObs('');
+    setNuevaTareaFecha('');
+    setShowTaskForm(false);
   };
 
-  const fechaEcuador = new Date().toLocaleDateString('es-EC', {
+  const fechaEcuador = currentTime.toLocaleDateString('es-EC', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric'
   });
+
+  const getUrgenciaBadge = (urgencia: string) => {
+    switch (urgencia) {
+      case 'Alta':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+            Alta
+          </span>
+        );
+      case 'Media':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+            Media
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300">
+            Baja
+          </span>
+        );
+    }
+  };
 
   return (
     <div className="space-y-6 text-left">
@@ -110,53 +191,79 @@ export const DashboardPage: React.FC = () => {
                 <span className="text-xs font-bold text-[#9ED8ED] uppercase tracking-wider">
                   Jornada Matutina · Régimen Costa
                 </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs text-slate-400 font-mono">
+                  {currentTime.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}
+                </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black capitalize mt-1 text-white">
                 {fechaEcuador}
               </h2>
             </div>
-            <Badge variant="frosted" className="self-start sm:self-auto">
-              Colegio Vicente Rocafuerte
-            </Badge>
+            <div className="self-start sm:self-auto px-3 py-1 rounded-lg bg-white/10 text-xs font-semibold text-[#9ED8ED]">
+              {institucionActiva?.nombre || user?.institucion || 'U.E. Fisco-Misional Democracia'}
+            </div>
           </div>
 
           {/* Clases del día */}
           <div className="mt-5 space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
-              Horario del Día
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
+                Horario del Día
+              </span>
+              <InfoTooltip content="Muestra la clase activa y la siguiente según tu carga horaria semanal." />
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Clase en curso */}
-              <div className="p-3.5 rounded-xl bg-[#176087]/80 border border-[#9ED8ED]/40 flex flex-col justify-between relative overflow-hidden">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                    En Curso Ahora
-                  </span>
-                  <span className="text-xs font-mono font-bold text-white">07:15 - 08:45</span>
+              {/* Clase en curso (P3.2: sólo se muestra badge si realmente coincide con el horario) */}
+              {claseEnCurso ? (
+                <div className="p-3.5 rounded-xl bg-[#176087]/80 border border-[#9ED8ED]/40 flex flex-col justify-between relative overflow-hidden">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                      En Curso Ahora
+                    </span>
+                    <span className="text-xs font-mono font-bold text-white">{claseEnCurso.horario}</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">{claseEnCurso.paralelo} · {claseEnCurso.materia}</h4>
+                    <p className="text-xs text-[#9ED8ED] mt-0.5">{claseEnCurso.tema}</p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-200">{claseEnCurso.aula}</span>
+                    <Link
+                      to={claseEnCurso.link}
+                      className="text-xs font-bold text-[#9ED8ED] hover:underline"
+                    >
+                      Tomar asistencia →
+                    </Link>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">8vo EGB "A" · Lengua y Literatura</h4>
-                  <p className="text-xs text-[#9ED8ED] mt-0.5">Estructura del ensayo y conectores</p>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-slate-900/40 border border-slate-700/50 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                      Sin clase activa
+                    </span>
+                    <span className="text-xs font-mono text-slate-400">Receso / Fuera de aula</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-300">Periodo de gestión docente</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">Puedes revisar tareas o avanzar con la planificación PUD.</p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-slate-700/50 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-400">Sala de profesores</span>
+                    <Link to="/workspace" className="text-xs font-bold text-[#9ED8ED] hover:underline">
+                      Ir al Workspace →
+                    </Link>
+                  </div>
                 </div>
-                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-200">Aula 204 · Bloque B</span>
-                  <Link
-                    to="/asistencia/par-8vo-a"
-                    className="text-xs font-bold text-[#9ED8ED] hover:underline"
-                  >
-                    Ver asistencia →
-                  </Link>
-                </div>
-              </div>
+              )}
 
               {/* Siguiente clase */}
-              <div className="p-3.5 rounded-xl bg-slate-900/50 border border-slate-700/60 flex flex-col justify-between">
+              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700/60 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                    Siguiente Clase
+                    Siguiente Bloque
                   </span>
                   <span className="text-xs font-mono text-slate-300">10:00 - 11:30</span>
                 </div>
@@ -181,9 +288,12 @@ export const DashboardPage: React.FC = () => {
         {/* Acceso Rápido */}
         <Card className="p-6 flex flex-col justify-between space-y-4">
           <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-[#176087] dark:text-[#9ED8ED]">
-              Accesos Rápidos
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#176087] dark:text-[#9ED8ED]">
+                Accesos Rápidos
+              </span>
+              <InfoTooltip content="Atajos directos para tus acciones diarias más frecuentes." />
+            </div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
               Acciones Frecuentes
             </h3>
@@ -194,7 +304,7 @@ export const DashboardPage: React.FC = () => {
               <Button variant="primary" size="md" className="w-full justify-between">
                 <span className="flex items-center gap-2">
                   <UserCheck className="w-4 h-4" />
-                  Tomar asistencia ahora (9no B)
+                  Tomar asistencia hoy (9no B)
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
@@ -204,7 +314,7 @@ export const DashboardPage: React.FC = () => {
               <Button variant="outline" size="md" className="w-full justify-between">
                 <span className="flex items-center gap-2">
                   <Plus className="w-4 h-4" />
-                  Nueva actividad pedagógica
+                  Nueva tarea en Workspace
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
@@ -214,7 +324,7 @@ export const DashboardPage: React.FC = () => {
               <Button variant="outline" size="md" className="w-full justify-between">
                 <span className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
-                  Generar planificación con IA
+                  Generar PUD con IA
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
@@ -224,7 +334,7 @@ export const DashboardPage: React.FC = () => {
               <Button variant="ghost" size="md" className="w-full justify-between border border-slate-200 dark:border-slate-800">
                 <span className="flex items-center gap-2">
                   <GraduationCap className="w-4 h-4" />
-                  Ver libro de calificaciones
+                  Libro de calificaciones
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
@@ -233,281 +343,265 @@ export const DashboardPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* 2. MINI-CARDS DE ESTADÍSTICAS RÁPIDAS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">Estudiantes Activos</span>
-            <Users className="w-4 h-4 text-[#176087]" />
-          </div>
-          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">60</div>
-          <span className="text-[11px] text-slate-400">8vo A (30) y 9no B (30)</span>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">Por Calificar</span>
-            <Clock className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-black font-mono text-amber-600 mt-1">5</div>
-          <span className="text-[11px] text-slate-400">Entregas pendientes</span>
-        </Card>
-
+      {/* 2. STATS RÁPIDAS (P3.2: Reemplazadas por Clases Esta Semana y Actividades por Calificar) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <Card className="p-4">
           <div className="flex items-center justify-between text-slate-500">
             <span className="text-xs font-medium">Clases Esta Semana</span>
             <Calendar className="w-4 h-4 text-[#176087]" />
           </div>
-          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">12</div>
-          <span className="text-[11px] text-slate-400">9 planificadas / 3 dictadas</span>
+          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">14</div>
+          <span className="text-[11px] text-slate-400">10 dictadas · 4 por dictar</span>
         </Card>
 
         <Card className="p-4">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">% Asistencia Mes</span>
-            <TrendingUp className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-medium">Actividades por Calificar</span>
+            <Clock className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="text-2xl font-black font-mono text-emerald-600 mt-1">94.2%</div>
-          <span className="text-[11px] text-slate-400">Promedio institucional</span>
+          <div className="text-2xl font-black font-mono text-amber-600 mt-1">5</div>
+          <span className="text-[11px] text-slate-400">En 8vo A y 9no B</span>
         </Card>
 
-        <Card className="p-4 col-span-2 sm:col-span-1">
+        <Card className="p-4">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">Informes Oficiales</span>
-            <FileText className="w-4 h-4 text-[#176087]" />
+            <span className="text-xs font-medium">% Asistencia del Mes</span>
+            <TrendingUp className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">3</div>
-          <span className="text-[11px] text-slate-400">Listos para exportar</span>
+          <div className="text-2xl font-black font-mono text-emerald-600 mt-1">94.8%</div>
+          <span className="text-[11px] text-slate-400">60 estudiantes activos</span>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-medium">Unidades PUD Activas</span>
+            <BookOpenCheck className="w-4 h-4 text-[#176087]" />
+          </div>
+          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">2</div>
+          <span className="text-[11px] text-slate-400">Bloques 1 y 2 en curso</span>
         </Card>
       </div>
 
-      {/* 3. SECCIÓN INFERIOR — TO-DO INTELIGENTE Y ÚLTIMAS ACTIVIDADES */}
+      {/* 3. SECCIÓN INFERIOR — TO-DO CON CAMPOS COMPLETOS Y ACTIVIDADES */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* To-Do Inteligente */}
         <Card className="lg:col-span-2 p-6 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Por Hacer (To-do Inteligente)
-                </h3>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Priorizado automáticamente según pendientes de calificaciones y asistencia.
-              </p>
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Por Hacer (To-do Docente)
+              </h3>
+              <InfoTooltip content="Lista priorizada automáticamente de tus pendientes diarios con semáforo de urgencia y fecha límite." />
             </div>
-            <span className="text-xs font-semibold text-[#176087] dark:text-[#9ED8ED]">
-              {todoList.filter((t) => !t.completada).length} pendientes
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-[#176087] dark:text-[#9ED8ED]">
+                {todoList.filter((t) => !t.completada).length} pendientes
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowTaskForm(!showTaskForm)}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{showTaskForm ? 'Ocultar' : 'Nueva tarea'}</span>
+              </Button>
+            </div>
           </div>
 
-          {/* Formulario para agregar tarea manual */}
-          <form onSubmit={handleAddTarea} className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Añadir una tarea manual al flujo de hoy..."
-              value={nuevaTareaTexto}
-              onChange={(e) => setNuevaTareaTexto(e.target.value)}
-              className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:outline-none focus:border-[#176087]"
-            />
-            <Button type="submit" size="sm" variant="primary">
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              Añadir
-            </Button>
-          </form>
+          {/* Formulario desplegable con Urgencia, Fecha límite y Observaciones (P3.2) */}
+          {showTaskForm && (
+            <form onSubmit={handleAddTarea} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Título de la tarea
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Preparar material para el bloque 3..."
+                  value={nuevaTareaTitulo}
+                  onChange={(e) => setNuevaTareaTitulo(e.target.value)}
+                  className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
+                  required
+                />
+              </div>
 
-          {/* Lista de Tareas */}
-          <div className="space-y-2">
-            {todoList.map((t) => (
-              <div
-                key={t.id}
-                className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
-                  t.completada
-                    ? 'bg-slate-100/50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-800 opacity-60'
-                    : 'bg-white dark:bg-[#0A2239] border-slate-200/80 dark:border-slate-800 hover:border-[#176087]/50'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={t.completada}
-                    onChange={() => handleToggleTodo(t.id)}
-                    className="w-4 h-4 rounded text-[#176087] focus:ring-[#176087] cursor-pointer"
-                  />
-                  <div className="min-w-0">
-                    <p className={`text-xs font-medium truncate ${t.completada ? 'line-through text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                      {t.titulo}
-                    </p>
-                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400">
-                      <span>{t.modulo}</span>
-                      <span>·</span>
-                      <span className={t.urgencia === 'alta' ? 'text-rose-500 font-bold' : t.urgencia === 'media' ? 'text-amber-500' : 'text-slate-400'}>
-                        Urgencia {t.urgencia}
-                      </span>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Nivel de Urgencia
+                  </label>
+                  <select
+                    value={nuevaTareaUrgencia}
+                    onChange={(e) => setNuevaTareaUrgencia(e.target.value as any)}
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="Alta">🔴 Alta (Urgente hoy / mañana)</option>
+                    <option value="Media">🟡 Media (Esta semana)</option>
+                    <option value="Baja">🔵 Baja (Proyectada)</option>
+                  </select>
                 </div>
 
-                <Link to={t.link}>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-[#176087] dark:text-[#9ED8ED]">
-                    Ir
-                  </Button>
-                </Link>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Fecha límite
+                  </label>
+                  <input
+                    type="date"
+                    value={nuevaTareaFecha}
+                    onChange={(e) => setNuevaTareaFecha(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Observaciones / Notas adicionales
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Notas adicionales, estudiantes involucrados o acuerdos pedagógicos..."
+                  value={nuevaTareaObs}
+                  onChange={(e) => setNuevaTareaObs(e.target.value)}
+                  className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setShowTaskForm(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" variant="primary" size="sm">
+                  Guardar Tarea
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {/* Lista de tareas */}
+          <div className="space-y-2">
+            {todoList.map((item) => (
+              <div
+                key={item.id}
+                className={`p-3.5 rounded-xl border transition-all duration-150 flex items-start gap-3 ${
+                  item.completada
+                    ? 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-60'
+                    : 'bg-white dark:bg-[#071727] border-slate-200/80 dark:border-slate-800 shadow-xs'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={item.completada}
+                  onChange={() => handleToggleTodo(item.id)}
+                  className="mt-1 w-4 h-4 rounded text-[#176087] cursor-pointer"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p
+                      className={`text-xs font-semibold text-slate-800 dark:text-slate-100 ${
+                        item.completada ? 'line-through text-slate-400' : ''
+                      }`}
+                    >
+                      {item.titulo}
+                    </p>
+                    {getUrgenciaBadge(item.urgencia)}
+                    {item.fechaLimite && (
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                        <Clock className="w-3 h-3" /> {item.fechaLimite}
+                      </span>
+                    )}
+                  </div>
+                  {item.observaciones && (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                      {item.observaciones}
+                    </p>
+                  )}
+                </div>
+                {item.link && (
+                  <Link
+                    to={item.link}
+                    className="text-xs font-bold text-[#176087] dark:text-[#9ED8ED] hover:underline shrink-0 self-center"
+                  >
+                    Ir →
+                  </Link>
+                )}
               </div>
             ))}
           </div>
         </Card>
 
-        {/* Feed de Últimas Actividades */}
+        {/* Últimas Actividades */}
         <Card className="p-6 space-y-4">
-          <div className="pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-1.5 pb-3 border-b border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Últimas Actividades
+              Actividad Reciente
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">Historial reciente del flujo docente</p>
+            <InfoTooltip content="Registro histórico de tus últimas modificaciones en asistencia, notas y planes." />
           </div>
 
-          <div className="space-y-4">
-            {[
-              {
-                id: '1',
-                titulo: 'Asistencia registrada',
-                desc: '8vo EGB "A" — 28 presentes, 1 atraso, 1 falta justificada.',
-                time: 'Hace 45 min',
-                icon: UserCheck,
-                color: 'text-emerald-500'
-              },
-              {
-                id: '2',
-                titulo: 'Nueva actividad creada con IA',
-                desc: 'Deber 2: Micro-crónica barrial asignada a 8vo A.',
-                time: 'Hace 3 horas',
-                icon: Sparkles,
-                color: 'text-[#176087] dark:text-[#9ED8ED]'
-              },
-              {
-                id: '3',
-                titulo: 'Calificaciones guardadas',
-                desc: 'Taller de Figuras Literarias en 9no B cerrado.',
-                time: 'Ayer',
-                icon: GraduationCap,
-                color: 'text-amber-500'
-              },
-              {
-                id: '4',
-                titulo: 'Planificación curricular guardada',
-                desc: 'Bloque 2 con destrezas MINEDUC completado al 70%.',
-                time: 'Hace 2 días',
-                icon: BookOpenCheck,
-                color: 'text-indigo-500'
-              }
-            ].map((act) => {
-              const Icon = act.icon;
-              return (
-                <div key={act.id} className="flex items-start gap-3 text-xs">
-                  <div className={`p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 ${act.color} shrink-0 mt-0.5`}>
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                        {act.titulo}
-                      </span>
-                      <span className="text-[10px] text-slate-400 shrink-0">{act.time}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                      {act.desc}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="space-y-3.5">
+            <div className="flex items-start gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  Asistencia registrada en 8vo A
+                </p>
+                <p className="text-[11px] text-slate-500">28 presentes, 1 atraso, 1 justificada</p>
+                <span className="text-[10px] text-slate-400">Hace 45 min</span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  Planificación Bloque 2 aprobada
+                </p>
+                <p className="text-[11px] text-slate-500">Unidad microcurricular generada con IA</p>
+                <span className="text-[10px] text-slate-400">Hace 3 horas</span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  5 notas actualizadas en 9no B
+                </p>
+                <p className="text-[11px] text-slate-500">Taller de Figuras Literarias</p>
+                <span className="text-[10px] text-slate-400">Ayer</span>
+              </div>
+            </div>
           </div>
         </Card>
       </div>
 
-      {/* Onboarding Tour Modal (3 Pasos) */}
-      <Modal
-        isOpen={showOnboarding}
-        onClose={() => {
-          setShowOnboarding(false);
-          setSearchParams({});
-        }}
-        title={`Bienvenido a asap, ${user?.nombre || 'Docente'}`}
-        subtitle={`Paso ${onboardingStep} de 3 — Guía rápida de inicio`}
-      >
-        <div className="space-y-4 text-sm text-left">
-          {onboardingStep === 1 && (
-            <div className="space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-[#176087]/20 text-[#176087] dark:text-[#9ED8ED] flex items-center justify-center">
-                <Compass className="w-6 h-6" />
-              </div>
-              <h4 className="text-base font-bold text-slate-900 dark:text-white">
-                1. Tu Panel Diario responde: ¿Qué tengo hoy y qué me falta?
-              </h4>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Cada mañana al iniciar sesión verás la clase en curso, tu horario y una lista inteligente priorizada con tareas de asistencia y calificaciones pendientes.
-              </p>
+      {/* Onboarding Dialog */}
+      {showOnboarding && (
+        <Modal
+          isOpen={showOnboarding}
+          onClose={() => setShowOnboarding(false)}
+          title="¡Bienvenido a tu Espacio Docente en asap!"
+        >
+          <div className="space-y-4 py-2 text-xs text-slate-600 dark:text-slate-300">
+            <p>
+              Hemos configurado tu perfil como <strong>{user?.nombre}</strong> con tus paralelos asignados en la {institucionActiva?.nombre}.
+            </p>
+            <div className="p-3 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1">
+              <p className="font-bold text-sky-900 dark:text-sky-300">Flujo diario recomendado:</p>
+              <p>1. Toma de asistencia al inicio del bloque.</p>
+              <p>2. Registro continuo de calificaciones sin recargar.</p>
+              <p>3. Generación automática de unidades PUD con IA.</p>
             </div>
-          )}
-
-          {onboardingStep === 2 && (
-            <div className="space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-[#9ED8ED]/30 text-[#0A2239] dark:text-[#9ED8ED] flex items-center justify-center">
-                <UserCheck className="w-6 h-6" />
-              </div>
-              <h4 className="text-base font-bold text-slate-900 dark:text-white">
-                2. Toma de asistencia ágil desde cualquier dispositivo
-              </h4>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Diseñado para usarse en menos de 60 segundos en el aula: botones directos de Presente, Atraso y Falta, con justificación automática y aviso de representante.
-              </p>
-            </div>
-          )}
-
-          {onboardingStep === 3 && (
-            <div className="space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 flex items-center justify-center">
-                <Sparkles className="w-6 h-6" />
-              </div>
-              <h4 className="text-base font-bold text-slate-900 dark:text-white">
-                3. Inteligencia Artificial nativa alineada al MINEDUC
-              </h4>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Genera unidades curriculares completas, sugerencias de actividades y diagnóstico pedagógico con solo seleccionar el bloque y la destreza.
-              </p>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
-            <span className="text-xs text-slate-400">Tour de bienvenida</span>
-            <div className="flex gap-2">
-              {onboardingStep > 1 && (
-                <Button size="sm" variant="outline" onClick={() => setOnboardingStep(onboardingStep - 1)}>
-                  Atrás
-                </Button>
-              )}
-              {onboardingStep < 3 ? (
-                <Button size="sm" variant="primary" onClick={() => setOnboardingStep(onboardingStep + 1)}>
-                  Siguiente
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={() => {
-                    setShowOnboarding(false);
-                    setSearchParams({});
-                  }}
-                >
-                  ¡Comenzar!
-                </Button>
-              )}
+            <div className="flex justify-end pt-2">
+              <Button size="sm" onClick={() => setShowOnboarding(false)}>
+                Comenzar mi jornada
+              </Button>
             </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
     </div>
   );
 };

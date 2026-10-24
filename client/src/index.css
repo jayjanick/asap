@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
     --radius: 0.75rem; /* 12px global */
@@ -32,3 +34,13 @@
 .font-mono, [data-tabular] {
   font-variant-numeric: tabular-nums;
 }
+
+/* Ocultar barras de desplazamiento para tablas y carruseles */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+

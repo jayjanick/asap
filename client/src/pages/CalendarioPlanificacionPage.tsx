@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Button, Badge } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import {
   Calendar as CalendarIcon,
@@ -132,13 +132,13 @@ export const CalendarioPlanificacionPage: React.FC = () => {
             </Button>
           </Link>
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <CalendarIcon className="w-6 h-6 text-[#176087] dark:text-[#9ED8ED]" />
-              Calendario de Clases y Planificación
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Sincronizado con el cronograma del régimen Costa 2026.
-            </p>
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+                Calendario de Clases
+              </h2>
+              <InfoTooltip content="Sincronizado con el cronograma del régimen Costa 2026 y fechas cívicas del Ministerio de Educación." />
+            </div>
           </div>
         </div>
 

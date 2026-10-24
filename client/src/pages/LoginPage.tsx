@@ -5,10 +5,10 @@ import { Button, Input } from '../components/ui';
 import { Sparkles, ArrowRight, ShieldCheck, Mail, Lock } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('andres.morales@educacion.gob.ec');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('andres.morales@uefdemocracia.edu.ec');
+  const [password, setPassword] = useState('asap2024');
   const [loading, setLoading] = useState(false);
   const [showRecover, setShowRecover] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState('');
@@ -24,7 +24,14 @@ export const LoginPage: React.FC = () => {
 
   const handleDemoLogin = async () => {
     setLoading(true);
-    await login('andres.morales@educacion.gob.ec', 'demo123');
+    await login('andres.morales@uefdemocracia.edu.ec', 'asap2024');
+    setLoading(false);
+    navigate('/dashboard');
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    await loginWithGoogle();
     setLoading(false);
     navigate('/dashboard');
   };
@@ -136,8 +143,8 @@ export const LoginPage: React.FC = () => {
         <div className="mt-4">
           <button
             type="button"
-            onClick={handleDemoLogin}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            onClick={handleGoogleLogin}
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer shadow-xs"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path
@@ -157,7 +164,7 @@ export const LoginPage: React.FC = () => {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span>Iniciar sesión con Google (Cuenta institucional)</span>
+            <span>Continuar con Google</span>
           </button>
         </div>
 

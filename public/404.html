@@ -1,20 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
   <head>
     <meta charset="utf-8">
-    <title>asap</title>
+    <title>asap — Redirigiendo...</title>
     <script>
-      // Single Page Apps for GitHub Pages workaround
-      var pathSegmentsToKeep = 0;
-      var l = window.location;
-      l.replace(
-        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?/' +
-        l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
-        (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
-        l.hash
-      );
+      (function() {
+        var pathSegmentsToKeep = 1; // 1 segment for GitHub Pages repository: /asap/
+        var l = window.location;
+        var pathname = l.pathname;
+        
+        // Extract the sub-path after /asap/
+        var segments = pathname.split('/').filter(Boolean);
+        var repoName = segments[0] || 'asap';
+        var subPath = segments.slice(pathSegmentsToKeep).join('/');
+        
+        if (subPath) {
+          sessionStorage.setItem('spa_redirect', '/' + subPath + (l.search || '') + (l.hash || ''));
+        }
+        
+        // Redirect to repository base
+        var target = l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + '/' + repoName + '/';
+        l.replace(target);
+      })();
     </script>
   </head>
-  <body></body>
+  <body>
+    <p style="font-family: sans-serif; text-align: center; margin-top: 50px; color: #176087;">
+      Cargando <strong>asap</strong>...
+    </p>
+  </body>
 </html>

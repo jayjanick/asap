@@ -140,3 +140,35 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   }
 );
 Input.displayName = 'Input';
+
+// ------------------------------------
+// INFO TOOLTIP (P3.1)
+// ------------------------------------
+import { Info } from 'lucide-react';
+
+export const InfoTooltip: React.FC<{ content: string; className?: string }> = ({ content, className }) => {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div className={cn('relative inline-flex items-center', className)}>
+      <button
+        type="button"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen(!open)}
+        className="text-slate-400 hover:text-[#176087] dark:hover:text-[#9ED8ED] transition-colors p-0.5 rounded cursor-pointer"
+        aria-label="Más información"
+      >
+        <Info size={14} />
+      </button>
+
+      {open && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 p-2.5 bg-slate-900 text-white text-xs rounded-xl shadow-xl z-50 pointer-events-none border border-slate-700 leading-relaxed font-normal">
+          {content}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+        </div>
+      )}
+    </div>
+  );
+};
+
