@@ -30,11 +30,33 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Conexión asíncrona a MongoDB Atlas con fallback en memoria
-connectDB().then((connected) => {
-  if (connected) {
-    seedDatabase(false);
+// Inicialización diferida de MongoDB Atlas (lazy) para evitar bloqueos durante el build
+let dbInitPromise: Promise<boolean> | null = null;
+
+export async function ensureDbConnected(): Promise<boolean> {
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      try {
+        const connected = await connectDB();
+        if (connected) {
+          await seedDatabase(false);
+        }
+        return connected;
+      } catch (err) {
+        console.warn('[asap DB] Error inicializando base de datos:', err);
+        return false;
+      }
+    })();
   }
+  return dbInitPromise;
+}
+
+// Activar conexión de forma asíncrona en la primera petición si aún no se ha disparado
+app.use((_req, _res, next) => {
+  if (!dbInitPromise && process.env.NODE_ENV !== 'test') {
+    ensureDbConnected().catch(() => {});
+  }
+  next();
 });
 
 // Almacén de estado en memoria (fallback persistente durante la sesión)
