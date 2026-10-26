@@ -295,32 +295,33 @@ export const PLANTILLAS_MINEDUC = [
 ];
 
 // ==========================================
-// DATABASE (MongoDB & Mongoose Models)
+// DATABASE (MongoDB & Mongoose Models) - Vercel Cached Pattern
 // ==========================================
-let isConnected = false;
+let cached: typeof mongoose | null = null;
 
 export async function connectDB(): Promise<boolean> {
+  if (cached && mongoose.connection.readyState === 1) return true;
   const uri = process.env.MONGODB_URI;
-  if (!uri || uri.includes('usuario:password')) {
-    isConnected = false;
-    return false;
-  }
+  if (!uri || uri.includes('usuario:password')) return false;
   try {
-    if (mongoose.connection.readyState >= 1) {
-      isConnected = true;
-      return true;
-    }
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
-    isConnected = true;
+    cached = await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000, bufferCommands: false });
     return true;
-  } catch (error) {
-    isConnected = false;
+  } catch (e) {
+    cached = null;
     return false;
   }
 }
 
 export function isMongoConnected(): boolean {
-  return isConnected && mongoose.connection.readyState === 1;
+  return mongoose.connection.readyState === 1;
+}
+
+export async function ensureDbConnected(): Promise<boolean> {
+  const connected = await connectDB();
+  if (connected) {
+    await seedDatabase(false).catch(() => {});
+  }
+  return connected;
 }
 
 // Schemas & Models
@@ -388,7 +389,6 @@ const DocumentoSchema = new Schema(
 );
 const Documento = mongoose.models.Documento || mongoose.model('Documento', DocumentoSchema);
 
-// NEW SCHEMAS REQUESTED BY USER
 const AsistenciaSchema = new Schema(
   {
     paraleloId: { type: String, required: true },
@@ -706,20 +706,6 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-let dbInitPromise: Promise<boolean> | null = null;
-export async function ensureDbConnected(): Promise<boolean> {
-  if (!dbInitPromise) {
-    dbInitPromise = (async () => {
-      const connected = await connectDB();
-      if (connected) {
-        await seedDatabase(false);
-      }
-      return connected;
-    })();
-  }
-  return dbInitPromise;
-}
-
 ensureDbConnected().catch(() => {});
 
 // In-memory fallbacks
@@ -830,9 +816,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Correo y contraseña son requeridos' });
     }
     const cleanEmail = email.toLowerCase().trim();
-    if (!isMongoConnected()) {
-      await connectDB();
-    }
+    await connectDB();
     if (isMongoConnected()) {
       const dbUser = await Usuario.findOne({ email: cleanEmail });
       if (!dbUser) {
@@ -894,6 +878,7 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
   const { email, nombre, avatar } = req.body;
   const targetEmail = (email || 'andres.morales@uefdemocracia.edu.ec').toLowerCase().trim();
   let dbUser = null;
+  await connectDB();
   if (isMongoConnected()) {
     try { dbUser = await Usuario.findOne({ email: targetEmail }); } catch (e) {}
   }
@@ -913,6 +898,7 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
 app.get('/api/auth/me', async (req: Request, res: Response) => {
   const userPayload = getUserFromToken(req);
   if (userPayload) {
+    await connectDB();
     if (isMongoConnected()) {
       try {
         const dbUser = await Usuario.findById(userPayload.id) || await Usuario.findOne({ email: userPayload.email });
@@ -960,7 +946,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Nombre, correo y contraseña requeridos.' });
     }
     const cleanEmail = email.toLowerCase().trim();
-    if (!isMongoConnected()) await connectDB();
+    await connectDB();
     if (!isMongoConnected()) {
       return res.status(503).json({ success: false, error: 'MongoDB no conectado.' });
     }
@@ -1006,6 +992,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 
 app.get('/api/dashboard', async (_req: Request, res: Response) => {
   let actividadesPendientes = 0;
+  await connectDB();
   if (isMongoConnected()) {
     try {
       actividadesPendientes = await Actividad.countDocuments({ estado: 'Por calificar' });
@@ -1038,6 +1025,7 @@ app.get('/api/dashboard', async (_req: Request, res: Response) => {
 });
 
 app.get('/api/paralelos', async (req: Request, res: Response) => {
+  await connectDB();
   if (isMongoConnected()) {
     try {
       const userPayload = getUserFromToken(req);
@@ -1081,6 +1069,7 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
 });
 
 app.get('/api/asistencia', async (req: Request, res: Response) => {
+  await connectDB();
   if (isMongoConnected()) {
     try {
       const userPayload = getUserFromToken(req);
@@ -1114,6 +1103,7 @@ app.get('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   const { cursoId } = req.params;
   const fechaHoy = new Date().toISOString().slice(0, 10);
 
+  await connectDB();
   if (isMongoConnected()) {
     try {
       let paraleloDoc = cursoId.match(/^[0-9a-fA-F]{24}$/) ? await Paralelo.findById(cursoId) : await Paralelo.findOne({ nombre: cursoId });
@@ -1186,6 +1176,7 @@ app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   const { registros } = req.body;
   const fechaHoy = new Date().toISOString().slice(0, 10);
 
+  await connectDB();
   if (isMongoConnected()) {
     try {
       await Asistencia.findOneAndUpdate(
@@ -1210,6 +1201,7 @@ app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
 app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
   const { cursoId } = req.params;
 
+  await connectDB();
   if (isMongoConnected()) {
     try {
       let mongoParalelo = cursoId.match(/^[0-9a-fA-F]{24}$/) ? await Paralelo.findById(cursoId) : await Paralelo.findOne({ nombre: cursoId });
@@ -1303,6 +1295,7 @@ app.put('/api/calificaciones/celda', async (req: Request, res: Response) => {
   const parsedNota = Math.max(0, Math.min(10, Number(nota) || 0));
   const finalNota = Number(parsedNota.toFixed(2));
 
+  await connectDB();
   if (isMongoConnected()) {
     try {
       await Calificacion.findOneAndUpdate(
@@ -1327,6 +1320,7 @@ app.put('/api/calificaciones/celda', async (req: Request, res: Response) => {
 app.post('/api/calificaciones/actividad', async (req: Request, res: Response) => {
   const { paraleloId, titulo, tipo, fechaEntrega, ponderacion, descripcion } = req.body;
 
+  await connectDB();
   if (isMongoConnected()) {
     try {
       const nuevaAct = await Actividad.create({
@@ -1381,6 +1375,7 @@ app.post('/api/calificaciones/actividad', async (req: Request, res: Response) =>
 
 // 6. GET /api/workspace/kanban y métodos (POST, PUT, DELETE)
 app.get('/api/workspace/kanban', async (_req: Request, res: Response) => {
+  await connectDB();
   if (isMongoConnected()) {
     try {
       const tasks = await KanbanTask.find().sort({ createdAt: -1 });
@@ -1413,6 +1408,7 @@ app.post('/api/workspace/kanban', async (req: Request, res: Response) => {
   const { titulo, descripcion, paralelo, columna, prioridad, urgencia, fechaLimite, observaciones } = req.body;
   const fechaHoy = new Date().toISOString().slice(0, 10);
 
+  await connectDB();
   if (isMongoConnected()) {
     try {
       const newTask = await KanbanTask.create({
@@ -1469,6 +1465,7 @@ app.post('/api/workspace/kanban', async (req: Request, res: Response) => {
 app.put('/api/workspace/kanban/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
 
+  await connectDB();
   if (isMongoConnected() && id.match(/^[0-9a-fA-F]{24}$/)) {
     try {
       const updated = await KanbanTask.findByIdAndUpdate(id, req.body, { new: true });
@@ -1505,6 +1502,7 @@ app.put('/api/workspace/kanban/:id', async (req: Request, res: Response) => {
 app.delete('/api/workspace/kanban/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
 
+  await connectDB();
   if (isMongoConnected() && id.match(/^[0-9a-fA-F]{24}$/)) {
     try {
       await KanbanTask.findByIdAndDelete(id);
@@ -1572,6 +1570,7 @@ app.get('/api/workspace', (_req: Request, res: Response) => {
 });
 
 app.get('/api/workspace/documentos', async (_req: Request, res: Response) => {
+  await connectDB();
   if (isMongoConnected()) {
     try {
       const docs = await Documento.find().sort({ createdAt: -1 });
@@ -1584,6 +1583,7 @@ app.get('/api/workspace/documentos', async (_req: Request, res: Response) => {
 app.post('/api/workspace/documentos', async (req: Request, res: Response) => {
   const nuevoDoc = { id: `doc-${Date.now()}`, fechaSubida: new Date().toLocaleDateString('es-EC'), ...req.body };
   documentosState.unshift(nuevoDoc);
+  await connectDB();
   if (isMongoConnected()) {
     try { await Documento.create(nuevoDoc); } catch (e) {}
   }
@@ -1592,6 +1592,7 @@ app.post('/api/workspace/documentos', async (req: Request, res: Response) => {
 
 app.delete('/api/workspace/documentos/:id', async (req: Request, res: Response) => {
   documentosState = documentosState.filter(d => d.id !== req.params.id);
+  await connectDB();
   if (isMongoConnected()) {
     try { await Documento.findByIdAndDelete(req.params.id); } catch (e) {}
   }
