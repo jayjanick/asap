@@ -458,51 +458,57 @@ export async function seedDatabase(force = false) {
     if (existingUser && !force) return;
 
     const hashedPassword = await bcrypt.hash('asap2024', 10);
+    const docenteData = {
+      nombre: 'Lic. Andrés Morales',
+      email: 'andres.morales@uefdemocracia.edu.ec',
+      password: hashedPassword,
+      rol: 'Docente',
+      materias: ['Lengua y Literatura'],
+      institucion: 'U.E. Fisco-Misional Democracia',
+      telefono: '+593 98 765 4321',
+      avatar: 'https://picsum.photos/seed/docente_andres/150/150'
+    };
+
     const docente = await Usuario.findOneAndUpdate(
       { email: 'andres.morales@uefdemocracia.edu.ec' },
-      {
-        nombre: 'Lic. Andrés Morales',
-        email: 'andres.morales@uefdemocracia.edu.ec',
-        password: hashedPassword,
-        rol: 'Docente',
-        materias: ['Lengua y Literatura'],
-        institucion: 'U.E. Fisco-Misional Democracia',
-        telefono: '+593 98 765 4321',
-        avatar: 'https://picsum.photos/seed/docente_andres/150/150'
-      },
+      force ? docenteData : { $setOnInsert: docenteData },
       { upsert: true, new: true }
     );
 
     for (const p of PARALELOS_INICIALES) {
+      const paraleloData = {
+        nombre: p.nombre,
+        grado: p.grado,
+        nivel: p.nivel,
+        jornada: p.jornada,
+        materia: p.materia,
+        horario: p.horario,
+        aula: p.aula,
+        docenteId: docente._id.toString()
+      };
+
       const paraleloDoc = await Paralelo.findOneAndUpdate(
         { nombre: p.nombre },
-        {
-          nombre: p.nombre,
-          grado: p.grado,
-          nivel: p.nivel,
-          jornada: p.jornada,
-          materia: p.materia,
-          horario: p.horario,
-          aula: p.aula,
-          docenteId: docente._id.toString()
-        },
+        force ? paraleloData : { $setOnInsert: paraleloData },
         { upsert: true, new: true }
       );
 
       for (const est of p.estudiantes) {
+        const alumnoData = {
+          nombre: est.nombre,
+          cedula: est.cedula,
+          numeroLista: est.numeroLista,
+          paraleloId: paraleloDoc._id.toString(),
+          activo: est.activo,
+          telefonoRepresentante: est.telefonoRepresentante || '+593 99 123 4567',
+          faltasJustificadas: est.faltasJustificadas || 0,
+          faltasInjustificadas: est.faltasInjustificadas || 0,
+          atrasos: est.atrasos || 0
+        };
+
         await Alumno.findOneAndUpdate(
           { cedula: est.cedula },
-          {
-            nombre: est.nombre,
-            cedula: est.cedula,
-            numeroLista: est.numeroLista,
-            paraleloId: paraleloDoc._id.toString(),
-            activo: est.activo,
-            telefonoRepresentante: est.telefonoRepresentante || '+593 99 123 4567',
-            faltasJustificadas: est.faltasJustificadas || 0,
-            faltasInjustificadas: est.faltasInjustificadas || 0,
-            atrasos: est.atrasos || 0
-          },
+          force ? alumnoData : { $setOnInsert: alumnoData },
           { upsert: true }
         );
       }
@@ -706,7 +712,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-ensureDbConnected().catch(() => {});
+connectDB().catch(() => {});
 
 // In-memory fallbacks
 let paralelosState = JSON.parse(JSON.stringify(PARALELOS_INICIALES));
