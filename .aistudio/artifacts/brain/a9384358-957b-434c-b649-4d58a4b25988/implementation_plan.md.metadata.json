@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan to consolidate server routes and mock data into api/index.ts for Vercel serverless compatibility and update vercel.json.",
-  "updatedAt":  "2026-10-26T06:20:58.555910603Z",
+  "summary":  "Plan to replace memory arrays with MongoDB queries and add Mongoose schemas for Asistencia, Calificacion, Actividad, and KanbanTask in api/index.ts with memory fallbacks.",
+  "updatedAt":  "2026-10-26T06:42:36.842832497Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

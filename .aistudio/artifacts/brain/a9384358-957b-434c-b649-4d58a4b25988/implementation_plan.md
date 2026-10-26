@@ -1,43 +1,30 @@
-# Serverless Consolidation Plan for Vercel Deployment
+# MongoDB Persistence & Schema Integration Plan
 
-Consolidate all server logic, routes, MongoDB connection, and mock data into a single self-contained `api/index.ts` file to eliminate `ERR_MODULE_NOT_FOUND` on Vercel serverless functions, and update `vercel.json`.
+Replace in-memory state arrays (`paralelosState`, `calificacionesMatrix`, `kanbanTasks`, `actividadesState`) in `api/index.ts` with real MongoDB queries using new Mongoose schemas, maintaining memory arrays strictly as fallbacks when `!isMongoConnected()`.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> - **Consolidation**: Moving all code from `server/routes/api.ts` and `server/data/mockData.ts` into `api/index.ts` so Vercel executes a single zero-dependency-import serverless entry point.
-> - **Configuration**: Simplifying `vercel.json` to remove `includeFiles`.
-
-- **Confirmed Decision**: Follow the exact user instructions for structuring `api/index.ts` and `vercel.json`.
+> - **New Mongoose Schemas**: `Asistencia`, `Calificacion`, `Actividad`, and `KanbanTask`.
+> - **Endpoints to Update**:
+>   1. `POST /api/asistencia/:cursoId`
+>   2. `GET /api/asistencia/:cursoId`
+>   3. `PUT /api/calificaciones/celda`
+>   4. `GET /api/calificaciones/:cursoId`
+>   5. `POST /api/calificaciones/actividad`
+>   6. `GET /api/workspace/kanban` (and related POST, PUT, DELETE methods)
+> - **Fallback Strategy**: If `!isMongoConnected()`, fall back seamlessly to the existing in-memory arrays.
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Resolves Vercel's runtime limitation where serverless functions cannot resolve relative imports outside `api/`.
-- **Key Value**: Guarantees 100% stable API responses (`/api/auth/login`, `/api/asistencia`, `/api/calificaciones`, etc.) when deployed on Vercel.
+- **What It Does**: Persists attendance, grades, activities, and Kanban tasks directly in MongoDB Atlas collections when connected, ensuring true multi-session persistence across serverless/server deployments.
+- **Key Value**: Eliminates reliance on volatile in-memory state when MongoDB is available.
 
-## 2. User Experience & Visual Design
+## 2. Technical Architecture & Data Strategy
 
-- No UI changes. Authentication, dashboard, attendance, and grading flows remain identical.
-
-## 3. Key Product Decisions & Trade-Offs
-
-- **Decision**: Single-file serverless architecture (`api/index.ts`).
-  - *Chosen Approach*: Inline all mock constants, helper functions, Mongoose models/connection logic, and Express route handlers into `api/index.ts`.
-  - *Why*: Vercel bundles `api/index.ts` (using esbuild during build or native node resolution) and executing a single file guarantees zero module resolution errors.
-
-## 4. Technical Architecture & Data Strategy
-
-```
-┌────────────────────────────────────────────────────────┐
-│                      Vercel Edge                       │
-└───────────────────────────┬────────────────────────────┘
-                            │ /api/*
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│                   api/index.ts                         │
-│  - Mongoose Connection & Models                        │
-│  - Mock Data Constants (DOCENTE_ACTUAL, Paralelos, etc) │
-│  - Express App & CORS Configuration                    │
-│  - Auth, Asistencia, Calificaciones, AI Endpoints      │
-└────────────────────────────────────────────────────────┘
-```
+- **New Mongoose Schemas**:
+  - `AsistenciaSchema`: `{ paraleloId: String, fecha: String, registros: [{ estudianteId: String, estado: String, justificada: Boolean, motivo: String }] }`
+  - `CalificacionSchema`: `{ paraleloId: String, estudianteId: String, actividadId: String, nota: Number }`
+  - `ActividadSchema`: `{ paraleloId: String, titulo: String, tipo: String, fechaEntrega: String, ponderacion: Number, entregadosCount: Number, totalCount: Number, estado: String, bloque: Number, descripcion: String }`
+  - `KanbanTaskSchema`: `{ titulo: String, descripcion: String, paralelo: String, columna: String, prioridad: String, urgencia: String, fecha: String, fechaLimite: String, observaciones: String, adjuntos: [String] }`
+- **Controller Logic**: Each of the 6 endpoints checks `isMongoConnected()`. If true, queries/mutates MongoDB. Otherwise, falls back to the in-memory array.
