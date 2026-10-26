@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { API_URL } from '../config/api';
 import { PARALELOS_INICIALES, Estudiante } from '../data/mockData';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { StudentProfileModal } from '../components/student/StudentProfileModal';
@@ -113,7 +114,7 @@ export const TomarAsistenciaPage: React.FC = () => {
   const handleGuardar = async () => {
     setGuardando(true);
     try {
-      await fetch(`/api/asistencia/${paralelo.id}`, {
+      await fetch(`${API_URL}/api/asistencia/${paralelo.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

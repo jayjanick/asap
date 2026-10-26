@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { API_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
 import { Button, Input, Card, Badge } from '../components/ui';
 import {
@@ -288,7 +289,7 @@ export const RegisterPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch(`${API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

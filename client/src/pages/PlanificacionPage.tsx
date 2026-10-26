@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { API_URL } from '../config/api';
 import { PLANIFICACIONES_MINEDUC, PlanificacionUnidad } from '../data/mockData';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Drawer } from '../components/ui/Dialogs';
@@ -35,7 +36,7 @@ export const PlanificacionPage: React.FC = () => {
   const handleGenerarIA = async () => {
     setGenerando(true);
     try {
-      const res = await fetch('/api/planificacion/generar-ia', {
+      const res = await fetch(`${API_URL}/api/planificacion/generar-ia`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

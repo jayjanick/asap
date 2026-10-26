@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { API_URL } from '../config/api';
 import { PARALELOS_INICIALES, ParaleloInfo } from '../data/mockData';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import {
@@ -18,7 +19,7 @@ export const AsistenciaPage: React.FC = () => {
 
   useEffect(() => {
     // Cargar estado actualizado desde backend
-    fetch('/api/asistencia')
+    fetch(`${API_URL}/api/asistencia`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.paralelos) {

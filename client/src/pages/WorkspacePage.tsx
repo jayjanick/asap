@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_URL } from '../config/api';
 import {
   DndContext,
   closestCorners,
@@ -322,14 +323,14 @@ export const WorkspacePage: React.FC = () => {
 
   // Cargar tareas y documentos del servidor al iniciar
   useEffect(() => {
-    fetch('/api/workspace/kanban')
+    fetch(`${API_URL}/api/workspace/kanban`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.kanbanTasks) setTasks(data.kanbanTasks);
       })
       .catch(() => {});
 
-    fetch('/api/workspace/documentos')
+    fetch(`${API_URL}/api/workspace/documentos`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.documentos && Array.isArray(data.documentos)) {
@@ -357,7 +358,7 @@ export const WorkspacePage: React.FC = () => {
         prev.map((t) => (t.id === activeId ? { ...t, columna: overId as any } : t))
       );
       // Sincronizar con servidor
-      fetch(`/api/workspace/kanban/${activeId}`, {
+      fetch(`${API_URL}/api/workspace/kanban/${activeId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ columna: overId })
@@ -371,7 +372,7 @@ export const WorkspacePage: React.FC = () => {
       setTasks((prev) =>
         prev.map((t) => (t.id === activeId ? { ...t, columna: overTask.columna } : t))
       );
-      fetch(`/api/workspace/kanban/${activeId}`, {
+      fetch(`${API_URL}/api/workspace/kanban/${activeId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ columna: overTask.columna })
@@ -400,7 +401,7 @@ export const WorkspacePage: React.FC = () => {
     setTasks([newTask, ...tasks]);
 
     try {
-      await fetch('/api/workspace/kanban', {
+      await fetch(`${API_URL}/api/workspace/kanban`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newTask)
@@ -421,7 +422,7 @@ export const WorkspacePage: React.FC = () => {
     setTasks((prev) => prev.map((t) => (t.id === selectedTask.id ? selectedTask : t)));
 
     try {
-      await fetch(`/api/workspace/kanban/${selectedTask.id}`, {
+      await fetch(`${API_URL}/api/workspace/kanban/${selectedTask.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(selectedTask)
@@ -436,7 +437,7 @@ export const WorkspacePage: React.FC = () => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
     setSelectedTask(null);
     try {
-      await fetch(`/api/workspace/kanban/${id}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/api/workspace/kanban/${id}`, { method: 'DELETE' });
     } catch {}
   };
 
@@ -487,7 +488,7 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
     setDocumentos([nuevoDoc, ...documentos]);
 
     try {
-      await fetch('/api/workspace/documentos', {
+      await fetch(`${API_URL}/api/workspace/documentos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nuevoDoc)
@@ -582,7 +583,7 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
     setDocumentos([nuevoDoc, ...documentos]);
 
     try {
-      await fetch('/api/workspace/documentos', {
+      await fetch(`${API_URL}/api/workspace/documentos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nuevoDoc)
@@ -627,7 +628,7 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
   const handleEliminarDocumento = async (id: string) => {
     setDocumentos((prev) => prev.filter((d) => d.id !== id));
     try {
-      await fetch(`/api/workspace/documentos/${id}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/api/workspace/documentos/${id}`, { method: 'DELETE' });
     } catch {}
   };
 

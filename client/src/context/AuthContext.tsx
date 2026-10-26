@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API_URL } from '../config/api';
 
 export interface InstitucionInfo {
   id: string;
@@ -114,7 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const savedToken = localStorage.getItem('asap_token');
     if (savedToken) {
-      fetch('/api/auth/me', {
+      fetch(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${savedToken}` }
       })
         .then((res) => (res.ok ? res.json() : null))
@@ -156,7 +157,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email?: string, password?: string): Promise<boolean> => {
     setAuthError(null);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -184,7 +185,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithGoogle = async (credential?: string): Promise<boolean> => {
     setAuthError(null);
     try {
-      const res = await fetch('/api/auth/google', {
+      const res = await fetch(`${API_URL}/api/auth/google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential })

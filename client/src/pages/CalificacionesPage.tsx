@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { API_URL } from '../config/api';
 import {
   PARALELOS_INICIALES,
   ACTIVIDADES_INICIALES,
@@ -86,7 +87,7 @@ export const CalificacionesPage: React.FC = () => {
     let isMounted = true;
     setCargandoIA(true);
 
-    fetch('/api/ai/analisis-rendimiento', {
+    fetch(`${API_URL}/api/ai/analisis-rendimiento`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paraleloId: paralelo.id })
@@ -261,7 +262,7 @@ export const CalificacionesPage: React.FC = () => {
   const handleGenerarInforme = async () => {
     setGenerandoInforme(true);
     try {
-      const res = await fetch('/api/ai/informe', {
+      const res = await fetch(`${API_URL}/api/ai/informe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
