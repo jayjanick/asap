@@ -345,7 +345,7 @@ const ParaleloSchema = new Schema(
     nombre: { type: String, required: true },
     grado: { type: Number, required: true },
     jornada: { type: String, enum: ['Matutina', 'Vespertina', 'Nocturna'], default: 'Matutina' },
-    docenteId: { type: Schema.Types.ObjectId, ref: 'Usuario', required: true },
+    docenteId: { type: String, required: true },
     materias: [{ type: String }],
     nivel: { type: String, default: 'Educación Básica Superior' },
     especialidad: { type: String },
@@ -979,7 +979,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
           nombre: paraleloNombre,
           grado: parseInt(curso.grado) || 8,
           jornada: 'Matutina',
-          docenteId: createdUser._id,
+          docenteId: createdUser._id.toString(),
           materias: [curso.materia || 'General']
         });
         if (Array.isArray(ests) && ests.length > 0) {
@@ -1036,25 +1036,24 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
     try {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id;
-      const paralelos = await Paralelo.find(docenteId ? { docenteId } : {});
-      if (paralelos && paralelos.length > 0) {
-        return res.json({
-          success: true,
-          paralelos: paralelos.map((p: any) => ({
-            id: p._id.toString(),
-            nombre: p.nombre,
-            grado: p.grado,
-            nivel: p.nivel || 'Educación Básica Superior',
-            jornada: p.jornada || 'Matutina',
-            materia: p.materia || 'General',
-            horario: '07:15 - 08:45',
-            aula: 'Aula 101',
-            totalEstudiantes: 30,
-            asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
-            porcentajeAsistenciaMes: 100
-          }))
-        });
-      }
+      if (!docenteId) return res.json({ success: true, paralelos: [] });
+      const paralelos = await Paralelo.find({ docenteId: String(docenteId) });
+      return res.json({
+        success: true,
+        paralelos: paralelos.map((p: any) => ({
+          id: p._id.toString(),
+          nombre: p.nombre,
+          grado: p.grado,
+          nivel: p.nivel || 'Educación Básica Superior',
+          jornada: p.jornada || 'Matutina',
+          materia: p.materia || 'General',
+          horario: '07:15 - 08:45',
+          aula: 'Aula 101',
+          totalEstudiantes: 30,
+          asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
+          porcentajeAsistenciaMes: 100
+        }))
+      });
     } catch (e) {}
   }
   res.json({
@@ -1079,22 +1078,22 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
   if (isMongoConnected()) {
     try {
       const userPayload = getUserFromToken(req);
-      const paralelos = await Paralelo.find(userPayload?.id ? { docenteId: userPayload.id } : {});
-      if (paralelos && paralelos.length > 0) {
-        return res.json({
-          success: true,
-          paralelos: paralelos.map((p: any) => ({
-            id: p._id.toString(),
-            nombre: p.nombre,
-            grado: p.grado,
-            jornada: p.jornada || 'Matutina',
-            materia: p.materia || 'General',
-            totalEstudiantes: 30,
-            asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
-            porcentajeAsistenciaMes: 100
-          }))
-        });
-      }
+      const docenteId = userPayload?.id;
+      if (!docenteId) return res.json({ success: true, paralelos: [] });
+      const paralelos = await Paralelo.find({ docenteId: String(docenteId) });
+      return res.json({
+        success: true,
+        paralelos: paralelos.map((p: any) => ({
+          id: p._id.toString(),
+          nombre: p.nombre,
+          grado: p.grado,
+          jornada: p.jornada || 'Matutina',
+          materia: p.materia || 'General',
+          totalEstudiantes: 30,
+          asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
+          porcentajeAsistenciaMes: 100
+        }))
+      });
     } catch (e) {}
   }
   res.json({ success: true, paralelos: paralelosState });
