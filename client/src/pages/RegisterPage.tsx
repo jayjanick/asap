@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { useAuth } from '../context/AuthContext';
 import { Button, Input, Card, Badge } from '../components/ui';
 import {
@@ -107,26 +108,31 @@ export const RegisterPage: React.FC = () => {
     setCursos(cursos.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
   };
 
-  // Cargar estudiantes desde archivo CSV / TXT para un curso específico
-  const handleFileUploadForCurso = (e: React.ChangeEvent<HTMLInputElement>, cursoId: string) => {
+  // Cargar estudiantes desde archivo CSV / TXT / XLSX para un curso específico
+  const handleFileUploadForCurso = async (e: React.ChangeEvent<HTMLInputElement>, cursoId: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setArchivoSubido((prev) => ({ ...prev, [cursoId]: file.name }));
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      if (text) {
-        const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      try {
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
         const parsedList: EstudianteRow[] = [];
 
-        lines.forEach((line, index) => {
-          const parts = line.split(/[,;\t]/);
-          if (parts.length >= 1) {
-            const possibleName = parts[0].trim();
-            if (possibleName && !possibleName.toLowerCase().includes('nombre') && !possibleName.toLowerCase().includes('estudiante')) {
-              const possibleCedula = parts[1] ? parts[1].trim() : '';
+        rows.forEach((row) => {
+          if (Array.isArray(row) && row.length >= 1) {
+            const possibleName = String(row[0] || '').trim();
+            if (
+              possibleName &&
+              !possibleName.toLowerCase().includes('nombre') &&
+              !possibleName.toLowerCase().includes('estudiante') &&
+              !possibleName.toLowerCase().includes('nombres y apellidos')
+            ) {
+              const possibleCedula = row[1] ? String(row[1]).trim() : '';
               parsedList.push({
                 lista: parsedList.length + 1,
                 nombre: possibleName,
@@ -142,9 +148,46 @@ export const RegisterPage: React.FC = () => {
             [cursoId]: parsedList
           }));
         }
+      } catch (err) {
+        console.error('Error al procesar archivo Excel:', err);
       }
-    };
-    reader.readAsText(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        if (text) {
+          const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+          const parsedList: EstudianteRow[] = [];
+
+          lines.forEach((line) => {
+            const parts = line.split(/[,;\t]/);
+            if (parts.length >= 1) {
+              const possibleName = parts[0].trim();
+              if (
+                possibleName &&
+                !possibleName.toLowerCase().includes('nombre') &&
+                !possibleName.toLowerCase().includes('estudiante')
+              ) {
+                const possibleCedula = parts[1] ? parts[1].trim() : '';
+                parsedList.push({
+                  lista: parsedList.length + 1,
+                  nombre: possibleName,
+                  cedula: possibleCedula
+                });
+              }
+            }
+          });
+
+          if (parsedList.length > 0) {
+            setEstudiantesPorCurso((prev) => ({
+              ...prev,
+              [cursoId]: parsedList
+            }));
+          }
+        }
+      };
+      reader.readAsText(file); // solo para CSV y TXT
+    }
   };
 
   const handleAddManualEstudiante = (cursoId: string) => {
@@ -264,20 +307,22 @@ export const RegisterPage: React.FC = () => {
         })
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Error al completar el registro.');
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || data?.message || 'Error al completar el registro.');
       }
 
-      await login(email, password);
+      const loginOk = await login(email, password);
       setLoading(false);
-      navigate('/dashboard?onboarding=true');
+      if (loginOk) {
+        navigate('/dashboard?onboarding=true');
+      } else {
+        setStepError('Registro exitoso. Por favor ingresa con tus credenciales desde la pantalla de Iniciar Sesión.');
+      }
     } catch (e: any) {
-      console.warn('Registro en backend con advertencia:', e);
-      // Fallback a auto-login en interfaz si hubiese desconexión
-      await login(email || 'docente@asap.ec', password || 'asap2026');
+      console.error('Error durante el registro:', e);
+      setStepError(e.message || 'Error de conexión al registrar el usuario.');
       setLoading(false);
-      navigate('/dashboard?onboarding=true');
     }
   };
 

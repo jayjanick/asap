@@ -67,7 +67,7 @@ export async function runAllTests() {
       passed: resHealth.status === 200 && resHealth.data?.status === 'ok',
     });
 
-    // Test 2: Auth Login
+    // Test 2: Auth Login con credenciales válidas
     const resLogin = await makeRequest('/api/auth/login', 'POST', {
       email: 'andres.morales@uefdemocracia.edu.ec',
       password: 'asap2024',
@@ -75,6 +75,33 @@ export async function runAllTests() {
     results.push({
       test: 'POST /api/auth/login genera JWT y retorna usuario docente Andrés Morales',
       passed: resLogin.status === 200 && Boolean(resLogin.data?.token) && resLogin.data?.user?.rol === 'Docente',
+    });
+
+    // Test 2b: Auth Login rechaza contraseña incorrecta (401)
+    const resBadPass = await makeRequest('/api/auth/login', 'POST', {
+      email: 'andres.morales@uefdemocracia.edu.ec',
+      password: 'clave_incorrecta_123',
+    });
+    results.push({
+      test: 'POST /api/auth/login rechaza contraseña incorrecta con status 401',
+      passed: resBadPass.status === 401 && resBadPass.data?.error === 'Contraseña incorrecta',
+    });
+
+    // Test 2c: Auth Login rechaza usuario no registrado (404)
+    const resNoUser = await makeRequest('/api/auth/login', 'POST', {
+      email: 'usuario.inexistente@noexiste.ec',
+      password: 'algunapassword',
+    });
+    results.push({
+      test: 'POST /api/auth/login rechaza usuario no registrado con status 404',
+      passed: resNoUser.status === 404 && resNoUser.data?.error === 'Usuario no encontrado',
+    });
+
+    // Test 2d: GET /api/auth/me sin token retorna 401
+    const resNoAuth = await makeRequest('/api/auth/me');
+    results.push({
+      test: 'GET /api/auth/me sin token retorna status 401',
+      passed: resNoAuth.status === 401,
     });
 
     // Test 3: Dashboard data

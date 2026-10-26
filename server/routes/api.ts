@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import {
   DOCENTE_ACTUAL,
   PARALELOS_INICIALES,
@@ -30,34 +31,23 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Inicialización diferida de MongoDB Atlas (lazy) para evitar bloqueos durante el build
+// Conexión a MongoDB Atlas y seed inicial
 let dbInitPromise: Promise<boolean> | null = null;
-
 export async function ensureDbConnected(): Promise<boolean> {
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
-      try {
-        const connected = await connectDB();
-        if (connected) {
-          await seedDatabase(false);
-        }
-        return connected;
-      } catch (err) {
-        console.warn('[asap DB] Error inicializando base de datos:', err);
-        return false;
+      const connected = await connectDB();
+      if (connected) {
+        await seedDatabase(false);
       }
+      return connected;
     })();
   }
   return dbInitPromise;
 }
 
-// Activar conexión de forma asíncrona en la primera petición si aún no se ha disparado
-app.use((_req, _res, next) => {
-  if (!dbInitPromise && process.env.NODE_ENV !== 'test') {
-    ensureDbConnected().catch(() => {});
-  }
-  next();
-});
+// Iniciar conexión en runtime (dev o prod)
+ensureDbConnected().catch(() => {});
 
 // Almacén de estado en memoria (fallback persistente durante la sesión)
 let paralelosState = JSON.parse(JSON.stringify(PARALELOS_INICIALES));
@@ -204,66 +194,135 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // 2. AUTHENTICATION (JWT + Demo + Google OAuth)
 // ==========================================
 app.post('/api/auth/login', async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  let user = { ...DOCENTE_ACTUAL };
-  if (email) {
-    user.email = email;
-  }
-
-  // Si Mongo está conectado, consultar usuario
-  if (isMongoConnected() && email) {
-    try {
-      const dbUser = await Usuario.findOne({ email: email.toLowerCase() });
-      if (dbUser) {
-        user = {
-          ...user,
-          nombre: dbUser.nombre,
-          email: dbUser.email,
-          rol: dbUser.rol,
-          institucion: dbUser.institucion,
-          materias: dbUser.materias
-        };
-      }
-    } catch (err) {
-      console.warn('Error leyendo usuario en MongoDB:', err);
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Correo y contraseña son requeridos' });
     }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Asegurar conexión a MongoDB si está pendiente
+    if (!isMongoConnected()) {
+      await connectDB();
+    }
+
+    // Si Mongo está conectado, consultar usuario y validar contraseña con bcrypt
+    if (isMongoConnected()) {
+      const dbUser = await Usuario.findOne({ email: cleanEmail });
+      if (!dbUser) {
+        return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+      }
+
+      // Validar contraseña con bcrypt (con soporte retrocompatible para contraseñas previas)
+      let isValid = false;
+      if (dbUser.password && dbUser.password.startsWith('$2')) {
+        isValid = await bcrypt.compare(password, dbUser.password);
+      } else if (dbUser.password) {
+        isValid = password === dbUser.password;
+        if (isValid) {
+          dbUser.password = await bcrypt.hash(password, 10);
+          await dbUser.save();
+        }
+      }
+
+      if (!isValid) {
+        return res.status(401).json({ success: false, error: 'Contraseña incorrecta' });
+      }
+
+      const user = {
+        id: dbUser._id.toString(),
+        nombre: dbUser.nombre,
+        email: dbUser.email,
+        rol: dbUser.rol,
+        institucion: dbUser.institucion,
+        materias: dbUser.materias || [],
+        avatar: dbUser.avatar || DOCENTE_ACTUAL.avatar,
+        distrito: 'Distrito 09D04 · Guayaquil Centro',
+        provincia: 'Guayas',
+        canton: 'Guayaquil',
+        totalAlumnos: 60,
+        asistenciaPromedioGeneral: 94.8
+      };
+
+      const token = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          nombre: user.nombre,
+          rol: user.rol,
+          institucion: user.institucion
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      return res.json({
+        success: true,
+        token,
+        user,
+        message: 'Sesión iniciada correctamente'
+      });
+    }
+
+    // Fallback offline (solo si Mongo estuviese desconectado):
+    // Andrés Morales solo funciona con sus credenciales exactas: andres.morales@uefdemocracia.edu.ec / asap2024
+    if (cleanEmail === 'andres.morales@uefdemocracia.edu.ec') {
+      if (password !== 'asap2024') {
+        return res.status(401).json({ success: false, error: 'Contraseña incorrecta' });
+      }
+      const token = jwt.sign(
+        {
+          id: 'docente-1',
+          email: DOCENTE_ACTUAL.email,
+          nombre: DOCENTE_ACTUAL.nombre,
+          rol: DOCENTE_ACTUAL.rol,
+          institucion: DOCENTE_ACTUAL.institucion
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        success: true,
+        token,
+        user: DOCENTE_ACTUAL,
+        message: 'Sesión iniciada correctamente'
+      });
+    }
+
+    return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+  } catch (error: any) {
+    console.error('Error en /api/auth/login:', error);
+    return res.status(500).json({ success: false, error: 'Error interno en el servidor' });
   }
-
-  const token = jwt.sign(
-    {
-      id: user.id || 'docente-1',
-      email: user.email,
-      nombre: user.nombre,
-      rol: user.rol,
-      institucion: user.institucion
-    },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-
-  res.json({
-    success: true,
-    token,
-    user,
-    message: 'Sesión iniciada correctamente'
-  });
 });
 
 app.post('/api/auth/google', async (req: Request, res: Response) => {
   const { credential, email, nombre, avatar } = req.body;
 
-  // Manejo de Google OAuth real o simulación
+  const targetEmail = (email || 'andres.morales@uefdemocracia.edu.ec').toLowerCase().trim();
+  let dbUser = null;
+
+  if (isMongoConnected()) {
+    try {
+      dbUser = await Usuario.findOne({ email: targetEmail });
+    } catch (e) {}
+  }
+
   const user = {
-    ...DOCENTE_ACTUAL,
-    nombre: nombre || 'Lic. Andrés Morales',
-    email: email || 'andres.morales@uefdemocracia.edu.ec',
-    avatar: avatar || 'https://picsum.photos/seed/google_avatar/150/150'
+    id: dbUser ? dbUser._id.toString() : 'docente-1',
+    nombre: dbUser?.nombre || nombre || 'Lic. Andrés Morales',
+    email: dbUser?.email || targetEmail,
+    rol: dbUser?.rol || 'Docente',
+    institucion: dbUser?.institucion || 'U.E. Fisco-Misional Democracia',
+    materias: dbUser?.materias || ['Lengua y Literatura'],
+    avatar: avatar || dbUser?.avatar || 'https://picsum.photos/seed/google_avatar/150/150'
   };
 
   const token = jwt.sign(
     {
-      id: user.id || 'docente-1',
+      id: user.id,
       email: user.email,
       nombre: user.nombre,
       rol: user.rol,
@@ -282,19 +341,48 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/auth/me', (req: Request, res: Response) => {
+app.get('/api/auth/me', async (req: Request, res: Response) => {
   const userPayload = getUserFromToken(req);
   if (userPayload) {
+    if (isMongoConnected()) {
+      try {
+        const dbUser = await Usuario.findById(userPayload.id) || await Usuario.findOne({ email: userPayload.email });
+        if (dbUser) {
+          return res.json({
+            success: true,
+            user: {
+              id: dbUser._id.toString(),
+              nombre: dbUser.nombre,
+              email: dbUser.email,
+              rol: dbUser.rol,
+              institucion: dbUser.institucion,
+              materias: dbUser.materias || [],
+              avatar: dbUser.avatar || DOCENTE_ACTUAL.avatar,
+              distrito: 'Distrito 09D04 · Guayaquil Centro',
+              provincia: 'Guayas',
+              canton: 'Guayaquil',
+              totalAlumnos: 60,
+              asistenciaPromedioGeneral: 94.8
+            }
+          });
+        }
+      } catch (e) {}
+    }
     return res.json({
       success: true,
       user: {
-        ...DOCENTE_ACTUAL,
-        ...userPayload
+        id: userPayload.id,
+        email: userPayload.email,
+        nombre: userPayload.nombre,
+        rol: userPayload.rol,
+        institucion: userPayload.institucion,
+        materias: userPayload.materias || ['Lengua y Literatura'],
+        avatar: DOCENTE_ACTUAL.avatar
       }
     });
   }
-  // Fallback demo
-  res.json({ success: true, user: DOCENTE_ACTUAL });
+  // No autorizado si no hay token válido
+  res.status(401).json({ success: false, error: 'No autenticado' });
 });
 
 app.post('/api/auth/register', async (req: Request, res: Response) => {
@@ -314,8 +402,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       estudiantesPorCurso
     } = req.body;
 
-    if (!nombre || !email) {
-      return res.status(400).json({ success: false, error: 'Nombre y correo son requeridos.' });
+    if (!nombre || !email || !password) {
+      return res.status(400).json({ success: false, error: 'Nombre, correo y contraseña son requeridos.' });
     }
 
     const cleanEmail = email.toLowerCase().trim();
@@ -323,24 +411,38 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     let savedUserId = 'docente-new';
     let mongoUser = null;
 
-    if (isMongoConnected()) {
-      try {
-        let existing = await Usuario.findOne({ email: cleanEmail });
-        if (!existing) {
-          existing = await Usuario.create({
-            nombre: nombre.trim(),
-            email: cleanEmail,
-            password: password || 'asap2026',
-            rol: rol || 'Docente',
-            institucion: institucion || 'Unidad Educativa',
-            materias: (cursos || []).map((c: any) => c.materia).filter(Boolean)
-          });
-        }
-        mongoUser = existing;
-        savedUserId = existing._id.toString();
-      } catch (err) {
-        console.warn('Error guardando usuario en MongoDB:', err);
+    if (!isMongoConnected()) {
+      await connectDB();
+    }
+
+    if (!isMongoConnected()) {
+      return res.status(503).json({
+        success: false,
+        error: 'No se pudo conectar a MongoDB Atlas. Por favor verifica las credenciales y el estado de la base de datos.'
+      });
+    }
+
+    try {
+      const existing = await Usuario.findOne({ email: cleanEmail });
+      if (existing) {
+        return res.status(409).json({ success: false, error: 'Ya existe una cuenta registrada con este correo electrónico.' });
       }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const createdUser = await Usuario.create({
+        nombre: nombre.trim(),
+        email: cleanEmail,
+        password: hashedPassword,
+        rol: rol || 'Docente',
+        institucion: institucion || 'Unidad Educativa',
+        materias: (cursos || []).map((c: any) => c.materia).filter(Boolean)
+      });
+
+      mongoUser = createdUser;
+      savedUserId = createdUser._id.toString();
+    } catch (err: any) {
+      console.error('Error guardando usuario en MongoDB:', err);
+      return res.status(500).json({ success: false, error: 'Error al registrar usuario: ' + (err.message || 'Error de base de datos') });
     }
 
     const createdParalelos: any[] = [];
@@ -521,9 +623,86 @@ app.get('/api/dashboard', async (_req: Request, res: Response) => {
 });
 
 // ==========================================
-// 4. ASISTENCIA
+// 4. PARALELOS & ASISTENCIA
 // ==========================================
-app.get('/api/asistencia', (_req: Request, res: Response) => {
+app.get('/api/paralelos', async (req: Request, res: Response) => {
+  if (isMongoConnected()) {
+    try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id;
+      const query = docenteId ? { docenteId } : {};
+      const paralelos = await Paralelo.find(query);
+      if (paralelos && paralelos.length > 0) {
+        return res.json({
+          success: true,
+          paralelos: paralelos.map((p: any) => ({
+            id: p._id.toString(),
+            nombre: p.nombre,
+            grado: p.grado,
+            nivel: p.nivel || 'Educación Básica Superior',
+            jornada: p.jornada || 'Matutina',
+            materia: p.materia || (p.materias && p.materias[0]) || 'General',
+            horario: p.horario || '07:15 - 08:45',
+            aula: p.aula || 'Aula 101',
+            totalEstudiantes: p.totalEstudiantes || 30,
+            asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
+            porcentajeAsistenciaMes: 100
+          }))
+        });
+      }
+    } catch (err) {
+      console.warn('Error obteniendo paralelos en MongoDB:', err);
+    }
+  }
+
+  // Fallback cuando !isMongoConnected()
+  res.json({
+    success: true,
+    paralelos: paralelosState.map((p: any) => ({
+      id: p.id,
+      nombre: p.nombre,
+      grado: p.grado,
+      jornada: p.jornada,
+      materia: p.materia,
+      totalEstudiantes: p.totalEstudiantes,
+      asistenciaHoyRegistrada: p.asistenciaHoyRegistrada,
+      porcentajeAsistenciaMes: p.porcentajeAsistenciaMes,
+      aula: p.aula,
+      horario: p.horario
+    }))
+  });
+});
+
+app.get('/api/asistencia', async (req: Request, res: Response) => {
+  if (isMongoConnected()) {
+    try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id;
+      const query = docenteId ? { docenteId } : {};
+      const paralelos = await Paralelo.find(query);
+      if (paralelos && paralelos.length > 0) {
+        return res.json({
+          success: true,
+          paralelos: paralelos.map((p: any) => ({
+            id: p._id.toString(),
+            nombre: p.nombre,
+            grado: p.grado,
+            jornada: p.jornada || 'Matutina',
+            materia: p.materia || (p.materias && p.materias[0]) || 'General',
+            totalEstudiantes: p.totalEstudiantes || 30,
+            asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
+            porcentajeAsistenciaMes: 100,
+            aula: p.aula || 'Aula 101',
+            horario: p.horario || '07:15 - 08:45'
+          }))
+        });
+      }
+    } catch (err) {
+      console.warn('Error obteniendo asistencia de paralelos en MongoDB:', err);
+    }
+  }
+
+  // Fallback cuando !isMongoConnected()
   res.json({
     success: true,
     paralelos: paralelosState.map((p: any) => ({
@@ -635,7 +814,110 @@ app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
 // ==========================================
 // 5. CALIFICACIONES & ANÁLISIS IA
 // ==========================================
-app.get('/api/calificaciones/:cursoId', (req: Request, res: Response) => {
+app.get('/api/calificaciones', async (req: Request, res: Response) => {
+  if (isMongoConnected()) {
+    try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id;
+      const query = docenteId ? { docenteId } : {};
+      const paralelos = await Paralelo.find(query);
+      if (paralelos && paralelos.length > 0) {
+        return res.json({
+          success: true,
+          paralelos: paralelos.map((p: any) => ({
+            id: p._id.toString(),
+            nombre: p.nombre,
+            grado: p.grado,
+            materia: p.materia || (p.materias && p.materias[0]) || 'General'
+          }))
+        });
+      }
+    } catch (err) {
+      console.warn('Error obteniendo calificaciones de MongoDB:', err);
+    }
+  }
+
+  // Fallback cuando !isMongoConnected()
+  res.json({
+    success: true,
+    paralelos: paralelosState.map((p: any) => ({
+      id: p.id,
+      nombre: p.nombre,
+      grado: p.grado,
+      materia: p.materia
+    }))
+  });
+});
+
+app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
+  const { cursoId } = req.params;
+
+  if (isMongoConnected()) {
+    try {
+      let mongoParalelo = null;
+      if (cursoId && cursoId.match(/^[0-9a-fA-F]{24}$/)) {
+        mongoParalelo = await Paralelo.findById(cursoId);
+      }
+      if (!mongoParalelo) {
+        mongoParalelo = await Paralelo.findOne({ nombre: cursoId });
+      }
+      if (mongoParalelo) {
+        const alumnos = await Alumno.find({ paraleloId: mongoParalelo._id.toString() });
+        const paraleloObj = {
+          id: mongoParalelo._id.toString(),
+          nombre: mongoParalelo.nombre,
+          grado: mongoParalelo.grado,
+          materia: mongoParalelo.materia || (mongoParalelo.materias && mongoParalelo.materias[0]) || 'General',
+          estudiantes: alumnos.map((a: any, idx: number) => ({
+            id: a._id.toString(),
+            nombre: a.nombre,
+            numeroLista: a.numeroLista || idx + 1,
+            cedula: a.cedula
+          }))
+        };
+        const actividades = actividadesState.filter((a: any) => a.paraleloId === paraleloObj.id || a.paraleloId === 'par-8vo-a');
+        const matrix = calificacionesMatrix[paraleloObj.id] || calificacionesMatrix['par-8vo-a'] || {};
+
+        const libroNotas = paraleloObj.estudiantes.map((est: any) => {
+          const notasAlumno: Record<string, number> = matrix[est.id] || {};
+          const notasArray = actividades.map((a: any) => notasAlumno[a.id] ?? 0);
+          const suma = notasArray.reduce((acc: number, curr: number) => acc + curr, 0);
+          const promedio = notasArray.length > 0 ? Number((suma / notasArray.length).toFixed(2)) : 0;
+
+          return {
+            estudianteId: est.id,
+            nombre: est.nombre,
+            numeroLista: est.numeroLista,
+            cedula: est.cedula,
+            notas: notasAlumno,
+            promedio
+          };
+        });
+
+        const promediosTodos = libroNotas.map((n: any) => n.promedio);
+        const promedioGeneral = promediosTodos.length > 0
+          ? Number((promediosTodos.reduce((a: number, b: number) => a + b, 0) / promediosTodos.length).toFixed(2))
+          : 7.5;
+        const aprobados = promediosTodos.filter((p: number) => p >= 7.0).length;
+        const porcentajeAprobados = promediosTodos.length > 0 ? (aprobados / promediosTodos.length) * 100 : 85;
+
+        return res.json({
+          success: true,
+          paralelo: paraleloObj,
+          actividades,
+          libroNotas,
+          estadisticas: {
+            promedioGeneral,
+            porcentajeAprobados,
+            totalEstudiantes: libroNotas.length,
+            enRiesgo: libroNotas.filter((n: any) => n.promedio < 7.0)
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Error consultando calificaciones de curso en MongoDB:', err);
+    }
+  }
   const paralelo = paralelosState.find((p: any) => p.id === req.params.cursoId) || paralelosState[0];
   if (!paralelo) {
     return res.status(404).json({ success: false, error: 'Paralelo no encontrado' });
@@ -898,7 +1180,19 @@ app.get('/api/workspace/documentos', async (_req: Request, res: Response) => {
     try {
       const docs = await Documento.find().sort({ createdAt: -1 });
       if (docs && docs.length > 0) {
-        return res.json({ success: true, documentos: docs });
+        return res.json({
+          success: true,
+          documentos: docs.map((d: any) => ({
+            id: d._id.toString(),
+            nombre: d.nombre,
+            categoria: d.categoria,
+            descripcion: d.descripcion,
+            tamano: d.tamano,
+            tipo: d.tipo,
+            fechaSubida: d.fechaSubida,
+            contenidoBase64: d.contenidoBase64
+          }))
+        });
       }
     } catch (err) {
       console.warn('Error obteniendo documentos de MongoDB:', err);

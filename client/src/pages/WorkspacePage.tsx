@@ -332,7 +332,13 @@ export const WorkspacePage: React.FC = () => {
     fetch('/api/workspace/documentos')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.documentos) setDocumentos(data.documentos);
+        if (data?.documentos && Array.isArray(data.documentos)) {
+          const normalized = data.documentos.map((d: any, idx: number) => ({
+            ...d,
+            id: String(d.id || d._id || `doc-${idx}`)
+          }));
+          setDocumentos(normalized);
+        }
       })
       .catch(() => {});
   }, []);
@@ -835,60 +841,64 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {docsFiltrados.map((doc) => (
-                    <tr key={doc.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2.5">
-                          <FileText className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED] shrink-0" />
-                          <div>
-                            <span className="font-bold text-slate-900 dark:text-white block">
-                              {doc.nombre}
-                            </span>
-                            {doc.descripcion && (
-                              <span className="text-[11px] text-slate-400 block truncate max-w-sm">
-                                {doc.descripcion}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <Badge variant="frosted">{doc.categoria}</Badge>
-                      </td>
-                      <td className="py-3 px-3 font-mono text-slate-500">
-                        {doc.tamano}
-                      </td>
-                      <td className="py-3 px-3 text-slate-500 font-mono">
-                        {doc.fechaSubida}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleDescargarArchivo(doc)}
-                            className="p-1.5 rounded-lg text-[#176087] hover:bg-[#176087]/10 dark:text-[#9ED8ED] dark:hover:bg-[#9ED8ED]/10 transition-colors cursor-pointer"
-                            title="Descargar archivo"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleEliminarDocumento(doc.id)}
-                            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
-                            title="Eliminar documento"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {docsFiltrados.length === 0 && (
-                    <tr>
+                  {docsFiltrados.length === 0 ? (
+                    <tr key="empty-documentos-row">
                       <td colSpan={5} className="py-10 text-center text-slate-400">
                         No hay documentos registrados en esta categoría.
                       </td>
                     </tr>
+                  ) : (
+                    docsFiltrados.map((doc, idx) => {
+                      const docUniqueKey = String(doc.id || (doc as any)._id || `doc-row-${idx}`);
+                      return (
+                        <tr key={docUniqueKey} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2.5">
+                              <FileText className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED] shrink-0" />
+                              <div>
+                                <span className="font-bold text-slate-900 dark:text-white block">
+                                  {doc.nombre}
+                                </span>
+                                {doc.descripcion && (
+                                  <span className="text-[11px] text-slate-400 block truncate max-w-sm">
+                                    {doc.descripcion}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <Badge variant="frosted">{doc.categoria}</Badge>
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-500">
+                            {doc.tamano}
+                          </td>
+                          <td className="py-3 px-3 text-slate-500 font-mono">
+                            {doc.fechaSubida}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDescargarArchivo(doc)}
+                                className="p-1.5 rounded-lg text-[#176087] hover:bg-[#176087]/10 dark:text-[#9ED8ED] dark:hover:bg-[#9ED8ED]/10 transition-colors cursor-pointer"
+                                title="Descargar archivo"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEliminarDocumento(docUniqueKey)}
+                                className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+                                title="Eliminar documento"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

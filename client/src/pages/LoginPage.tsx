@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button, Input } from '../components/ui';
-import { Sparkles, ArrowRight, ShieldCheck, Mail, Lock } from 'lucide-react';
+import { Sparkles, ArrowRight, ShieldCheck, Mail, Lock, AlertCircle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { login, loginWithGoogle, darkMode } = useAuth();
+  const { login, loginWithGoogle, darkMode, authError, clearAuthError } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('andres.morales@uefdemocracia.edu.ec');
-  const [password, setPassword] = useState('asap2024');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [showRecover, setShowRecover] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState('');
   const [recoverSent, setRecoverSent] = useState(false);
@@ -17,29 +18,48 @@ export const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await login(email, password);
+    setLocalError(null);
+    clearAuthError();
+
+    const success = await login(email, password);
     setLoading(false);
-    navigate('/dashboard');
+    if (success) {
+      navigate('/dashboard');
+    }
   };
 
   const handleDemoLogin = async () => {
     setLoading(true);
-    await login('andres.morales@uefdemocracia.edu.ec', 'asap2024');
+    setLocalError(null);
+    clearAuthError();
+    setEmail('andres.morales@uefdemocracia.edu.ec');
+    setPassword('asap2024');
+
+    const success = await login('andres.morales@uefdemocracia.edu.ec', 'asap2024');
     setLoading(false);
-    navigate('/dashboard');
+    if (success) {
+      navigate('/dashboard');
+    }
   };
 
   const handleGoogleLogin = async () => {
     setLoading(true);
-    await loginWithGoogle();
+    setLocalError(null);
+    clearAuthError();
+
+    const success = await loginWithGoogle();
     setLoading(false);
-    navigate('/dashboard');
+    if (success) {
+      navigate('/dashboard');
+    }
   };
 
   const handleRecover = (e: React.FormEvent) => {
     e.preventDefault();
     setRecoverSent(true);
   };
+
+  const activeError = authError || localError;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0A2239] via-[#0d2a45] to-[#0A2239] flex flex-col justify-center items-center p-4 sm:p-6 text-white relative overflow-hidden">
@@ -61,6 +81,14 @@ export const LoginPage: React.FC = () => {
           Infraestructura digital para docentes del Ecuador
         </p>
 
+        {/* Banner de error de autenticación */}
+        {activeError && (
+          <div className="mb-5 p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2 text-left animate-shake">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+            <span>{activeError}</span>
+          </div>
+        )}
+
         {/* Demo Teacher Fast Access */}
         <div className="mb-6 p-3 rounded-xl bg-[#9ED8ED]/20 dark:bg-[#176087]/20 border border-[#176087]/20 dark:border-[#9ED8ED]/20 text-left">
           <div className="flex items-center justify-between mb-1.5">
@@ -70,7 +98,7 @@ export const LoginPage: React.FC = () => {
             <span className="text-[10px] text-slate-500">1 clic</span>
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-300 mb-2 leading-tight">
-            Ingresa como <strong>Andrés Morales</strong> (8vo A y 9no B de Lengua y Literatura) con datos precargados.
+            Ingresa como <strong>Andrés Morales</strong> (andres.morales@uefdemocracia.edu.ec / clave: asap2024).
           </p>
           <Button
             type="button"
@@ -102,8 +130,11 @@ export const LoginPage: React.FC = () => {
             type="email"
             required
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="docente@educacion.gob.ec"
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (activeError) clearAuthError();
+            }}
+            placeholder="andres.morales@uefdemocracia.edu.ec"
           />
 
           <Input
@@ -111,7 +142,10 @@ export const LoginPage: React.FC = () => {
             type="password"
             required
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (activeError) clearAuthError();
+            }}
             placeholder="••••••••••••"
           />
 

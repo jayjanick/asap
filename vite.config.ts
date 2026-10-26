@@ -3,32 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
-  base: process.env.VERCEL ? '/' : (process.env.VITE_BASE || '/asap/'),
-  plugins: [
-    react(),
-    {
-      name: 'express-api-middleware',
-      async configureServer(server) {
-        server.middlewares.use((req, res, next) => {
-          if (req.url === '/' || req.url === '') {
-            const target = process.env.VERCEL ? '/' : '/asap/';
-            if (req.url !== target) {
-              res.writeHead(302, { Location: target });
-              res.end();
-              return;
-            }
-          }
-          next();
-        });
-        const { app: expressApp, ensureDbConnected } = await import('./server/routes/api');
-        ensureDbConnected().catch(() => {});
-        server.middlewares.use(expressApp);
-      },
-    },
-  ],
+  base: process.env.VITE_BASE || '/',
+  plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './client/src'),
+      '@': path.resolve(process.cwd(), './client/src'),
     },
   },
   server: {

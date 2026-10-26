@@ -20,7 +20,19 @@ export async function seedDatabase(force = false) {
   try {
     const existingUser = await Usuario.findOne({ email: 'andres.morales@uefdemocracia.edu.ec' });
     if (existingUser && !force) {
-      console.log('[Seed] La base de datos ya contiene al docente Andrés Morales. No se requiere seed.');
+      let isPassValid = false;
+      try {
+        if (existingUser.password && existingUser.password.startsWith('$2')) {
+          isPassValid = await bcrypt.compare('asap2024', existingUser.password);
+        }
+      } catch (e) {}
+
+      if (!isPassValid) {
+        console.log('[Seed] Actualizando contraseña de Andrés Morales a hash bcrypt de asap2024...');
+        existingUser.password = await bcrypt.hash('asap2024', 10);
+        await existingUser.save();
+      }
+      console.log('[Seed] La base de datos ya contiene al docente Andrés Morales. No se requiere seed completo.');
       return;
     }
 
@@ -129,7 +141,7 @@ export async function seedDatabase(force = false) {
 }
 
 // Si se ejecuta directamente vía CLI: `npm run seed`
-if (require.main === module || process.argv[1]?.endsWith('seed.ts')) {
+if (process.argv[1]?.endsWith('seed.ts')) {
   seedDatabase(true).then(() => {
     console.log('[Seed] Proceso terminado.');
     process.exit(0);

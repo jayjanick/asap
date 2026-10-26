@@ -57,16 +57,28 @@ Responde ÚNICAMENTE en JSON válido con la siguiente estructura exacta:
 
   if (ai) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.3,
-        },
-      });
+      let response: any = null;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          response = await ai.models.generateContent({
+            model: 'gemini-1.5-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.3,
+            },
+          });
+          break;
+        } catch (err: any) {
+          if (err?.status === 503 && attempts === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            attempts++;
+          } else throw err;
+        }
+      }
 
-      const text = response.text?.trim() || '';
+      const text = response?.text?.trim() || '';
       const parsed = JSON.parse(text);
       return { ...parsed, generadaIA: true };
     } catch (error) {
@@ -129,15 +141,27 @@ Responde ÚNICAMENTE en JSON con:
 
   if (ai) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.4,
-        },
-      });
-      const parsed = JSON.parse(response.text?.trim() || '{}');
+      let response: any = null;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          response = await ai.models.generateContent({
+            model: 'gemini-1.5-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.4,
+            },
+          });
+          break;
+        } catch (err: any) {
+          if (err?.status === 503 && attempts === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            attempts++;
+          } else throw err;
+        }
+      }
+      const parsed = JSON.parse(response?.text?.trim() || '{}');
       return { ...parsed, generadaIA: true };
     } catch (error) {
       console.warn('Error en Gemini generarActividad, usando fallback:', error);
@@ -194,15 +218,27 @@ Responde ÚNICAMENTE en JSON con:
 
   if (ai) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.3,
-        },
-      });
-      return JSON.parse(response.text?.trim() || '{}');
+      let response: any = null;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          response = await ai.models.generateContent({
+            model: 'gemini-1.5-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.3,
+            },
+          });
+          break;
+        } catch (err: any) {
+          if (err?.status === 503 && attempts === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            attempts++;
+          } else throw err;
+        }
+      }
+      return JSON.parse(response?.text?.trim() || '{}');
     } catch (error) {
       console.warn('Error en Gemini analizarRendimientoGrupo, usando fallback:', error);
     }
@@ -264,15 +300,27 @@ Responde ÚNICAMENTE en JSON:
 
   if (ai) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.3,
-        },
-      });
-      return JSON.parse(response.text?.trim() || '{}');
+      let response: any = null;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          response = await ai.models.generateContent({
+            model: 'gemini-1.5-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.3,
+            },
+          });
+          break;
+        } catch (err: any) {
+          if (err?.status === 503 && attempts === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            attempts++;
+          } else throw err;
+        }
+      }
+      return JSON.parse(response?.text?.trim() || '{}');
     } catch (error) {
       console.warn('Error en Gemini generarInformeInstitucional:', error);
     }

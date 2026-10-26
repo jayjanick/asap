@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan de correcciones integrales v1.1 para la plataforma educativa asap: persistencia Mongoose con fallback transparente en memoria, resolución de rutas y 404 en GitHub Pages con base /asap/, autenticación Google OAuth simulada y JWT persistente con revalidación /api/auth/me, persistencia real de asistencia, exportaciones CSV/XLSX/PDF/DOCX, editor de plantillas enriquecido, rediseño UX sin subtítulos excesivos con tooltips Info, Kanban con @dnd-kit, animaciones fluidas con Motion, y expansión de configuraciones de docente.",
-  "updatedAt":  "2026-10-24T08:39:01.833398080Z",
+  "summary":  "Plan de implementación para la corrección crítica de autenticación en asap (token nulo inicial, usuario inicial nulo, eliminación de fallbacks mock en login y registro, y validación estricta de contraseñas con bcrypt en MongoDB).",
+  "updatedAt":  "2026-10-26T03:52:34.953228423Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
