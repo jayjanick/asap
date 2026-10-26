@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan de implementación para la corrección crítica de autenticación en asap (token nulo inicial, usuario inicial nulo, eliminación de fallbacks mock en login y registro, y validación estricta de contraseñas con bcrypt en MongoDB).",
-  "updatedAt":  "2026-10-26T03:52:34.953228423Z",
+  "summary":  "Plan to consolidate server routes and mock data into api/index.ts for Vercel serverless compatibility and update vercel.json.",
+  "updatedAt":  "2026-10-26T06:20:58.555910603Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
