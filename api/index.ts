@@ -317,11 +317,7 @@ export function isMongoConnected(): boolean {
 }
 
 export async function ensureDbConnected(): Promise<boolean> {
-  const connected = await connectDB();
-  if (connected) {
-    await seedDatabase(false).catch(() => {});
-  }
-  return connected;
+  return connectDB();
 }
 
 // Schemas & Models
@@ -1051,7 +1047,12 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id;
       if (!docenteId) return res.json({ success: true, paralelos: [] });
-      const paralelos = await Paralelo.find({ docenteId: String(docenteId) });
+      const docenteIdStr = String(docenteId);
+      const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
+      const query = isObjectId
+        ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] }
+        : { docenteId: docenteIdStr };
+      const paralelos = await Paralelo.find(query);
       return res.json({
         success: true,
         paralelos: paralelos.map((p: any) => ({
@@ -1094,7 +1095,12 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id;
       if (!docenteId) return res.json({ success: true, paralelos: [] });
-      const paralelos = await Paralelo.find({ docenteId: String(docenteId) });
+      const docenteIdStr = String(docenteId);
+      const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
+      const query = isObjectId
+        ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] }
+        : { docenteId: docenteIdStr };
+      const paralelos = await Paralelo.find(query);
       return res.json({
         success: true,
         paralelos: paralelos.map((p: any) => ({
@@ -1653,6 +1659,26 @@ app.delete('/api/workspace/documentos/:id', async (req: Request, res: Response) 
   }
   documentosState = documentosState.filter(d => d.id !== id);
   res.json({ success: true });
+});
+
+// Endpoint de migración one-time: normaliza todos los docenteId de Paralelo a string puro
+app.post('/api/admin/fix-docente-ids', async (_req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) return res.status(503).json({ error: 'MongoDB no conectado' });
+  try {
+    const paralelos = await Paralelo.find({});
+    let fixed = 0;
+    for (const p of paralelos) {
+      const asString = p.docenteId?.toString();
+      if (asString && p.docenteId !== asString) {
+        await Paralelo.updateOne({ _id: p._id }, { $set: { docenteId: asString } });
+        fixed++;
+      }
+    }
+    return res.json({ success: true, fixed, total: paralelos.length, message: `${fixed} paralelos normalizados de ${paralelos.length} total` });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 export default app;
