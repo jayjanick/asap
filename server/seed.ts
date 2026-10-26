@@ -6,7 +6,7 @@ import Usuario from './models/Usuario';
 import Paralelo from './models/Paralelo';
 import Alumno from './models/Alumno';
 import Documento from './models/Documento';
-import { PARALELOS_INICIALES, PLANTILLAS_MINEDUC } from '../client/src/data/mockData';
+import { PARALELOS_INICIALES, PLANTILLAS_MINEDUC } from './data/mockData';
 
 dotenv.config();
 

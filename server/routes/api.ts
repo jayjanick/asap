@@ -8,7 +8,7 @@ import {
   ACTIVIDADES_INICIALES,
   PLANIFICACIONES_MINEDUC,
   PLANTILLAS_MINEDUC
-} from '../../client/src/data/mockData';
+} from '../data/mockData';
 import {
   generarPlanificacionCurricular,
   generarActividad,
