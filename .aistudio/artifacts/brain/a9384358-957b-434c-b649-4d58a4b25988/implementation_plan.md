@@ -1,125 +1,135 @@
-# Plan de Arquitectura: Configuración WebSocket Vite y Migración Integral a MongoDB Dinámico
+# Panel de Administración y Monitoreo — ASAP
 
-El objetivo de esta iniciativa es eliminar definitivamente los errores de conexión WebSocket originados por el cliente HMR de Vite en entornos de despliegue/iframe, y suprimir toda información estática o datos quemados en código (*mock/in-memory states*), garantizando que el flujo de datos opere exclusivamente a través de la URI de MongoDB y las APIs REST autenticadas.
+Implementación quirúrgica de un módulo de administración independiente para supervisar docentes registrados, estado operativo de la base de datos y variables de entorno, registro de errores en tiempo real y control de sesiones JWT activas respaldadas en MongoDB (compatible con entornos serverless como Vercel), manteniendo intacto el flujo actual del docente.
 
-## Decisiones Críticas y Preferencias del Usuario
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> A partir de las aclaraciones confirmadas por el usuario:
-> 1. **WebSocket HMR de Vite**: Se configurará `vite.config.ts` con cliente HMR seguro (`protocol: 'wss'`, `clientPort: 443`) y tolerancia a desconexión sin bloquear ni saturar la consola del navegador.
-> 2. **Alcance de Persistencia MongoDB**: Se migrarán **todos los módulos restantes** (Dashboard inteligente, Planificaciones Curriculares con IA, Alumnos y Estadísticas por docente) hacia colecciones dinámicas de MongoDB, manteniendo el fallback en memoria únicamente como salvaguarda en caso de caída transitoria de red.
+> Se han actualizado las decisiones arquitectónicas del plan conforme a tus correcciones:
 
-- **Decisión Confirmada 1**: Configurar Vite HMR con protocolo seguro `wss` y puerto cliente `443` en entornos con proxy reverso/HTTPS.
-- **Decisión Confirmada 2**: Reemplazar la data estática (`DOCENTE_ACTUAL`, `planificacionesState`, conteos fijos de 60 estudiantes o 94.8% de asistencia) por queries y agregaciones dinámicas en MongoDB filtradas por el `docenteId` del JWT.
-
----
-
-## 1. Visión General y Objetivos
-
-### ¿Qué soluciona esta implementación?
-1. **Estabilidad en Frontend**: Resuelve la causa raíz del error `WebSocket connection to 'wss://.../@vite/client' failed` que satura los logs del navegador cuando Vite intenta comunicarse con un socket local no expuesto a través del proxy HTTPS.
-2. **Autonomía y Veracidad de Datos**: Cada docente registrado verá únicamente sus propios paralelos, alumnos, tareas kanban, documentos, planificaciones curriculares y métricas de rendimiento reales calculadas desde la base de datos de MongoDB Atlas.
-
-### Beneficiarios
-- **Docentes de Educación Básica y Bachillerato**: Interfaz personalizada donde los cursos, nóminas y planificaciones son suyos y persisten indefinidamente entre sesiones.
-- **Administradores y Evaluadores de la Plataforma**: Logs limpios sin excepciones de red WebSocket ni sobreescrituras accidentales de usuarios.
+- **Eliminación en Cascada Completa (`DELETE /api/admin/usuarios/:id`)**: Al eliminar un usuario, se borrarán en cascada todos sus documentos asociados en MongoDB: primero se obtienen sus paralelos (`docenteId`) para eliminar `Alumno`, `Asistencia`, `Calificacion` y `Actividad` asociados por `paraleloId`; luego se eliminan `Paralelo`, `Planificacion`, `Documento` y `KanbanTask` por `docenteId`. **Regla especial para `KanbanTask`**: únicamente cuando el usuario a eliminar sea Andrés Morales (`email === 'andres.morales@uefdemocracia.edu.ec'`), el filtro de eliminación de `KanbanTask` incluirá también el identificador legacy `'docente-1'` (`{ docenteId: { $in: [id, 'docente-1'] } }`) para limpiar tareas con `docenteId` hardcodeado. Finalmente, se revocan sus sesiones en `Sesion` y se elimina el documento en `Usuario`.
+- **Persistencia de Sesiones en MongoDB (`Sesion` / colección `sesiones`)**: Para garantizar persistencia entre invocaciones serverless en Vercel (donde la memoria efímera se reinicia entre peticiones), se añade un esquema ligero `SesionSchema` con los campos `tokenId`, `userId`, `email`, `createdAt`, `expiresAt` y `revocado` (`boolean`, por defecto `false`). El middleware `requireAdmin` verificará en MongoDB que la sesión asociada al JWT tenga `revocado === false`. Revocar un token ejecutará `updateOne({ tokenId }, { $set: { revocado: true } })`.
+- **Credenciales del Administrador (`seed-admin`)**: El aprovisionamiento inicial leerá exclusivamente las credenciales desde las variables de entorno (`ADMIN_EMAIL` y `ADMIN_PASSWORD`). Una vez creado el primer usuario con rol `Admin`, el endpoint quedará deshabilitado automáticamente devolviendo `403 Forbidden`.
+- **Tipografías vía Google Fonts**: Las fuentes `Plus Jakarta Sans` y `DM Sans` se cargarán exclusivamente mediante etiquetas `<link>` de Google Fonts en el archivo HTML raíz, sin instalar paquetes ni dependencias adicionales en `npm`.
 
 ---
 
-## 2. Experiencia de Usuario y Flujo de Datos
+### 1. Overview & Core Concept
 
-### Flujo de Datos Dinámico (Fin a Fin)
-1. **Autenticación**: El usuario ingresa credenciales o usa Google OAuth. El backend genera un JWT con el `docenteId` correspondiente.
-2. **Dashboard Dinámico (`/api/dashboard`)**:
-   - Obtiene el usuario autenticado desde `Usuario.findById(docenteId)`.
-   - Consulta los paralelos del docente en `Paralelo.find({ docenteId })`.
-   - Cuenta en tiempo real los alumnos activos asociados a dichos paralelos en `Alumno.countDocuments({ paraleloId: { $in: misParalelosIds } })`.
-   - Calcula el promedio de asistencia mensual real a partir de `Asistencia.find({ paraleloId: { $in: misParalelosIds } })`.
-   - Genera los bloques de *"Por Hacer Inteligente"* utilizando los nombres reales de los cursos del docente.
-3. **Planificaciones Curriculares (`/api/planificacion`)**:
-   - `GET /api/planificacion`: Lee de la colección `Planificacion` filtrando por `{ docenteId }` ordenado por fecha de creación.
-   - `POST /api/planificacion`: Inserta el nuevo plan curricular generado manual o con Gemini en MongoDB vinculado al `docenteId`.
-4. **Vite WebSocket / HMR**:
-   - La aplicación cliente carga de forma fluida sin errores en la consola roja de las herramientas de desarrollador.
+- **What It Does**: Proporciona una consola administrativa aislada donde el administrador del sistema puede auditar cuentas de docentes, inspeccionar sus paralelos y métricas académicas, eliminar cuentas con limpieza total en cascada de sus datos asociados, verificar la salud de MongoDB y las variables de entorno configuradas, revisar los últimos 100 errores capturados y revocar sesiones JWT de forma persistente.
+- **Target Audience / Persona**: Administradores técnicos e institucionales responsables de la operación, soporte, limpieza de datos y seguridad de la plataforma ASAP.
+- **Key Value**: Visibilidad operativa y control de acceso persistente compatible con despliegues serverless en Vercel, sin interferir con la sesión, el contexto de autenticación ni la interfaz de trabajo de los docentes.
 
 ---
 
-## 3. Decisiones Técnicas y Arquitectura
+### 2. User Experience & Visual Design
 
-### 1. Vite HMR WebSocket
-- **Causa Raíz**: En entornos en la nube o iframes seguros (`https://ais-dev-....run.app`), Vite inyecta su cliente HMR que por defecto intenta abrir un WebSocket a `wss://<host>:3000/` o `ws://localhost:3000`. Dado que la conexión externa llega por HTTPS al puerto 443 a través de un proxy que no redirige ese subcanal de socket, la conexión falla repetidamente.
-- **Solución Implementada**:
-  - En `vite.config.ts`, configurar `server.hmr` con `protocol: 'wss'`, `clientPort: 443`, y `timeout: 5000` si está en entorno de producción o proxy, además de evitar overlays intrusivos con `overlay: false`. Si el entorno no soporta HMR bidireccional, se agrega un wrapper seguro para silenciar errores no críticos de HMR sin afectar la carga de la aplicación.
+- **Key User Flows**:
+  1. **Acceso Independiente**: El administrador ingresa por la vista pública de acceso administrativo, se valida que su cuenta posea estrictamente el rol `Admin`, se registra la sesión en la colección `sesiones` de MongoDB (`revocado: false`), y se almacena su credencial en `asap_admin_token` (separada de `asap_token` del docente).
+  2. **Resumen Operativo (Dashboard)**: Visualización inmediata de cuatro indicadores clave (Total de Usuarios, Estado de MongoDB, Sesiones Activas No Revocadas y Errores Recientes), acompañada de una tabla compacta con los últimos 5 incidentes capturados.
+  3. **Gestión de Docentes y Borrado en Cascada (Usuarios)**: Tabla con buscador instantáneo que muestra nombre, correo, rol, institución, fecha de registro y cantidad de paralelos. Incluye un modal de detalle con las estadísticas y paralelos del docente, y un modal de confirmación que informa claramente del borrado en cascada (paralelos, alumnos, asistencias, calificaciones, actividades, planificaciones, documentos y tareas Kanban) antes de ejecutar la eliminación.
+  4. **Diagnóstico del Sistema**: Panel en vivo que reporta el estado de conexión de Mongoose (`readyState`), el tiempo de actividad (`uptime`), la marca de tiempo del servidor y una matriz de verificación de variables de entorno presentes (sin exponer secretos).
+  5. **Auditoría de Errores y Seguridad**: Consulta de los últimos 100 errores HTTP con filtro por ruta o código de estado, y listado de sesiones JWT activas (`revocado: false`) desde MongoDB con botón para revocar cualquier sesión mediante `updateOne({ revocado: true })`.
 
-### 2. Esquema Mongoose para Planificaciones (`PlanificacionSchema`)
-- Se creará el modelo `Planificacion` en `api/index.ts`:
-  ```ts
-  {
-    docenteId: { type: String, required: true },
-    paraleloId: { type: String },
-    titulo: { type: String, required: true },
-    materia: { type: String, required: true },
-    nivel: { type: String, default: '8vo EGB' },
-    bloque: { type: Number, default: 2 },
-    destreza: { type: String, default: '' },
-    semanas: { type: Number, default: 4 },
-    progreso: { type: Number, default: 0 },
-    estado: { type: String, default: 'Por iniciar' },
-    generadaIA: { type: Boolean, default: false },
-    unidades: [{ semana: Number, tema: String, objetivo: String, actividades: [String], evaluacion: String }],
-    adaptacionesNEE: [{ grado: String, adaptacion: String }]
-  }
-  ```
+- **Visual Identity & Theme**:
+  - *Aesthetic Direction*: Consola de operaciones empresariales y telemetría limpia, priorizando alta densidad informativa, contraste nítido y ausencia de adornos innecesarios.
+  - *Color Palette & Mood*: Lienzo principal en gris neutro frío (`#F8FAFC`), barra lateral fija en pizarra profundo (`#0F172A`), superficies de datos en blanco puro (`#FFFFFF`) con bordes sutiles de `1px` (`#E2E8F0`), y semántica estricta de estado: Esmeralda (`#16A34A`) para servicios conectados, Ámbar (`#D97706`) para advertencias y Carmesí (`#DC2626`) para errores HTTP o acciones destructivas/revocación.
+  - *Typography & Hierarchy*: Encabezados y navegación en `Plus Jakarta Sans` (`600`/`700`) y cuerpo de lectura densa en `DM Sans` (`13px`–`15px`) cargadas vía Google Fonts en el HTML principal; cifras, marcas de tiempo, tiempos de actividad y códigos HTTP en tipografía monoespaciada con numerales tabulares (`font-mono tabular-nums`).
+  - *Component Styling & Layout*: Barra lateral izquierda fija (`250px`) totalmente independiente del layout docente, barra superior contextual con ruta activa y botón de cierre de sesión, y tablas de datos de alta densidad con filas compactas (`40px`).
 
-### 3. Métricas Reales en Dashboard
-- Sustituir los valores quemados (`totalEstudiantes: 60`, `asistenciaPromedioMes: 94.8`, docente Morales predeterminado) por consultas agregadas que cuenten alumnos y registros de asistencia reales de los paralelos del docente activo.
+- **Interactive Feedback & Motion**:
+  - Estados de carga con esqueletos estructurales (`Skeleton`) alineados a las tablas y tarjetas.
+  - Estados vacíos claros cuando no existen errores registrados o sesiones activas.
+  - Confirmaciones modales en interfaz (sin `window.alert`) antes de eliminar un usuario en cascada o revocar una sesión activa.
 
 ---
 
-## 4. Diagrama de Arquitectura y Persistencia
+### 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Respaldo de Sesiones en MongoDB (`SesionSchema`) + Caché en Memoria**
+  - *Chosen Approach*: Crear la colección ligera `sesiones` (`tokenId`, `userId`, `email`, `createdAt`, `expiresAt`, `revocado: boolean`) sincronizada con `activeSessions`. En cada verificación de `requireAdmin` (y validación de sesión), se comprueba en MongoDB que `revocado === false` y que `expiresAt > new Date()`. Revocar actualiza `revocado: true` mediante `updateOne`.
+  - *Why*: En entornos serverless como Vercel, las variables en memoria se pierden entre ejecuciones de funciones Lambda; persistir el estado `revocado` en MongoDB garantiza que las sesiones sigan siendo visibles y revocables de forma fiable en producción.
+  - *Alternatives Considered*: Mantener sesiones solo en un `Set`/`Map` en memoria; descartado porque pierde todas las sesiones al reciclarse la instancia serverless en Vercel.
+
+- **Decision 2: Borrado en Cascada Integral por `docenteId` y `paraleloId` (con soporte legacy para Andrés Morales)**
+  - *Chosen Approach*: Cuando el administrador elimina un docente en `DELETE /api/admin/usuarios/:id`, el backend obtiene primero el documento del usuario para verificar su email, localiza todos sus paralelos (`docenteId`), extrae sus IDs (`paraleloIds`), y ejecuta eliminaciones sobre `Alumno`, `Asistencia`, `Calificacion` y `Actividad` (`{ paraleloId: { $in: paraleloIds } }`), seguidas de `Paralelo`, `Planificacion` y `Documento` (`{ docenteId: id }`). Para `KanbanTask`, si `usuario.email === 'andres.morales@uefdemocracia.edu.ec'`, filtra por `{ docenteId: { $in: [id, 'docente-1'] } }`; para cualquier otro usuario filtra exclusivamente por `{ docenteId: id }`. Luego marca sus sesiones como `revocado: true` y elimina el documento `Usuario`.
+  - *Why*: Evita documentos huérfanos en la base de datos y limpia tareas Kanban legacy de Andrés Morales sin afectar las tareas de otros docentes.
+  - *Alternatives Considered*: Aplicar `'docente-1'` a todos los usuarios; descartado porque borraría las tareas legacy de Andrés Morales al eliminar a un docente distinto.
+
+- **Decision 3: Aislamiento Total de Autenticación (`asap_admin_token` vs `asap_token`)**
+  - *Chosen Approach*: Almacenar el token administrativo en una clave dedicada de `localStorage` y proteger las vistas mediante `AdminProtectedRoute` verificando `rol === 'Admin'`, sin modificar `AuthContext.tsx`.
+  - *Why*: Permite operar el panel administrativo y el portal docente de forma completamente independiente sin efectos secundarios en las vistas actuales.
+
+---
+
+### 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+- **Architecture & Component Diagram**:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   Cliente Web (React + Vite)                │
-│   - Sin errores WebSocket (HMR clientPort 443 / wss)        │
-│   - JWT Bearer Header en todas las peticiones               │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Express API Gateway (api/index.ts)          │
-│   - connectDB() con pool persistente                        │
-│   - getUserFromToken(req) -> docenteId (String)             │
-└──────┬───────────────────────┬───────────────────────┬──────┘
-       │                       │                       │
-       ▼                       ▼                       ▼
-┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-│  Colección   │       │  Colección   │       │  Colección   │
-│  Paralelos   │       │   Alumnos    │       │ Planificación│
-│ (docenteId)  │       │(paraleloId)  │       │ (docenteId)  │
-└──────────────┘       └──────────────┘       └──────────────┘
-       │                       │                       │
-       └───────────────────────┼───────────────────────┘
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│            MongoDB Atlas Cluster (MONGODB_URI)              │
-│       Persistencia completa sin arrays estáticos            │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        FRONTEND — CONSOLA ADMIN (SPA)                        │
+│               (Google Fonts: Plus Jakarta Sans + DM Sans)                    │
+│                                                                              │
+│  ┌────────────────────┐      ┌────────────────────────────────────────────┐  │
+│  │  AdminLoginPage    │─────▶│ localStorage: asap_admin_token (rol=Admin) │  │
+│  └────────────────────┘      └─────────────────────┬──────────────────────┘  │
+│                                                    │                         │
+│                                                    ▼                         │
+│                              ┌────────────────────────────────────────────┐  │
+│                              │   AdminProtectedRoute + AdminLayout        │  │
+│                              └─────────────────────┬──────────────────────┘  │
+│                                                    │                         │
+│        ┌───────────────────┬───────────────────┬───┴───────────────┬──────┐  │
+│        ▼                   ▼                   ▼                   ▼      ▼  │
+│  ┌───────────┐       ┌───────────┐       ┌───────────┐       ┌────────┐ ┌──┐ │
+│  │ Dashboard │       │ Usuarios  │       │  Sistema  │       │  Logs  │ │Se│ │
+│  │   View    │       │   View    │       │   View    │       │  View  │ │gu│ │
+│  └─────┬─────┘       └─────┬─────┘       └─────┬─────┘       └────┬───┘ └─┬┘ │
+└────────┼───────────────────┼───────────────────┼──────────────────┼───────┼──┘
+         │                   │                   │                  │       │
+         └───────────────────┴─────────┬─────────┴──────────────────┴───────┘
+                                       │ Bearer <asap_admin_token>
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                   BACKEND — EXPRESS / VERCEL SERVERLESS API                  │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │ Middleware requireAdmin (verifica JWT + rol==='Admin' + revocado===false)│  │
+│  └───────────┬───────────────────────┬────────────────────────┬───────────┘  │
+│              │                       │                        │              │
+│              ▼                       ▼                        ▼              │
+│  ┌──────────────────────┐ ┌─────────────────────┐ ┌───────────────────────┐  │
+│  │  MongoDB Collections │ │  MongoDB Sesiones   │ │ Diagnóstico & Logs    │  │
+│  │  • Usuario (+Admin)  │ │  • tokenId, userId  │ │ • connection.readySt. │  │
+│  │  • Cascada: Paralelo │ │  • email, createdAt │ │ • Variables presentes │  │
+│  │    Alumno,Asistencia │ │  • expiresAt        │ │ • Uptime y Timestamp  │  │
+│  │    Calif.,Plan,Doc,KB│ │  • revocado: false  │ │ • adminLogs[100]      │  │
+│  └──────────────────────┘ └─────────────────────┘ └───────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+- **Data Model & State**:
+  - **Usuario (`UsuarioSchema`)**: Se amplía el `enum` del campo `rol` a `['Docente', 'Director', 'Coordinador', 'Admin']`.
+  - **Sesión (`SesionSchema` / colección `sesiones`)**:
+    - `tokenId`: `String` (único, indexado, incluido en el payload del JWT al iniciar sesión).
+    - `userId`: `String` (ID del usuario en MongoDB).
+    - `email`: `String`.
+    - `createdAt`: `Date` (por defecto `Date.now`).
+    - `expiresAt`: `Date` (`+7 días` acorde a la expiración del JWT).
+    - `revocado`: `Boolean` (por defecto `false`).
+  - **Eliminación en Cascada (`DELETE /api/admin/usuarios/:id`)**:
+    1. Obtiene el documento del usuario (`const userToDelete = await Usuario.findById(id)`).
+    2. Busca todos los paralelos donde `docenteId` coincida con el `id` del usuario (`String` u `ObjectId`).
+    3. Recopila sus identificadores (`paraleloIds` como `ObjectId` y `String`).
+    4. Ejecuta `deleteMany` en `Alumno`, `Asistencia`, `Calificacion` y `Actividad` filtrando por `paraleloId: { $in: paraleloIds }`.
+    5. Ejecuta `deleteMany` en `Paralelo`, `Planificacion` y `Documento` filtrando por `docenteId: id`.
+    6. Ejecuta `deleteMany` en `KanbanTask` filtrando por `{ docenteId: { $in: [id, 'docente-1'] } }` si `userToDelete.email === 'andres.morales@uefdemocracia.edu.ec'`, o por `{ docenteId: id }` en caso contrario.
+    7. Ejecuta `Sesion.updateMany({ userId: id }, { $set: { revocado: true } })`.
+    8. Ejecuta `Usuario.findByIdAndDelete(id)` y retorna el resumen de documentos eliminados.
+  - **Registro de Errores (`adminLogs`)**: Lista acotada a los últimos 100 errores capturados por el middleware global de Express con `{ id, timestamp, method, route, message, statusCode }`.
 
-## 5. Plan de Ejecución Paso a Paso
-
-1. **Ajuste en `vite.config.ts`**:
-   - Configurar `server.hmr` con puerto y protocolo apropiados (`protocol: 'wss'`, `clientPort: 443`, `overlay: false`) para erradicar el error de WebSocket en navegación segura.
-2. **Nuevo Schema `Planificacion`**:
-   - Declarar `PlanificacionSchema` y compilar el modelo `Planificacion` en `api/index.ts`.
-3. **Migración de Endpoints de Planificación**:
-   - `GET /api/planificacion`: Consultar MongoDB filtrando por el `docenteId` del token.
-   - `POST /api/planificacion`: Guardar el plan generado en MongoDB con `docenteId`.
-4. **Cálculo Dinámico de Métricas en `GET /api/dashboard`**:
-   - Reemplazar datos fijos de `DOCENTE_ACTUAL`, conteo de alumnos y porcentajes por agregaciones reales en base a los paralelos del usuario.
-5. **Verificación y Testing**:
-   - Ejecutar `npm run build` y `npm test`.
-   - Validar con `lint_applet` y `compile_applet`.
+- **Interactive Component & State Mapping**:
+  - **Autenticación y Guardián**: `AdminLoginPage` invoca `POST /api/auth/login` (que crea el registro en `Sesion` con `revocado: false`), comprueba `user.rol === 'Admin'` y persiste `asap_admin_token`. `AdminProtectedRoute` verifica el token antes de montar `AdminLayout`.
+  - **Inspección y Borrado en Cascada de Usuarios**: `AdminUsuariosPage` carga `GET /api/admin/usuarios`, muestra el detalle completo mediante `GET /api/admin/usuarios/:id` y ejecuta `DELETE /api/admin/usuarios/:id` tras confirmación modal, limpiando todos los datos del docente en MongoDB (incluyendo `docente-1` en `KanbanTask` si se trata de Andrés Morales).
+  - **Monitoreo y Revocación Persistente**: `AdminSistemaPage` consulta `GET /api/admin/sistema`; `AdminLogsPage` consulta `GET /api/admin/logs`; `AdminSeguridadPage` lista las sesiones activas (`revocado: false`) desde `GET /api/admin/sesiones` y revoca tokens mediante `DELETE /api/admin/sesiones/:tokenId` (`Sesion.updateOne({ tokenId }, { $set: { revocado: true } })`).

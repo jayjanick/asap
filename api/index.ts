@@ -326,7 +326,7 @@ const UsuarioSchema = new Schema(
     nombre: { type: String, required: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
-    rol: { type: String, enum: ['Docente', 'Director', 'Coordinador'], default: 'Docente' },
+    rol: { type: String, enum: ['Docente', 'Director', 'Coordinador', 'Admin'], default: 'Docente' },
     materias: [{ type: String }],
     institucion: { type: String, required: true },
     telefono: { type: String },
@@ -472,6 +472,19 @@ const PlanificacionSchema = new Schema(
   { timestamps: true }
 );
 const Planificacion = mongoose.models.Planificacion || mongoose.model('Planificacion', PlanificacionSchema);
+
+const SesionSchema = new Schema(
+  {
+    tokenId: { type: String, required: true, unique: true, index: true },
+    userId: { type: String, required: true },
+    email: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    expiresAt: { type: Date, required: true },
+    revocado: { type: Boolean, default: false }
+  },
+  { collection: 'sesiones' }
+);
+const Sesion = mongoose.models.Sesion || mongoose.model('Sesion', SesionSchema);
 
 // Seed database function
 export async function seedDatabase(force = false) {
@@ -836,14 +849,103 @@ function initCalificaciones() {
 }
 initCalificaciones();
 
+export const adminLogs: Array<{
+  id: string;
+  timestamp: string;
+  method: string;
+  route: string;
+  message: string;
+  statusCode: number;
+}> = [];
+
+function recordAdminError(req: Request, statusCode: number, message: string) {
+  adminLogs.unshift({
+    id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: new Date().toISOString(),
+    method: req.method,
+    route: req.originalUrl || req.url,
+    message,
+    statusCode
+  });
+  if (adminLogs.length > 100) {
+    adminLogs.length = 100;
+  }
+}
+
+async function issueSessionToken(user: {
+  id: string;
+  email: string;
+  nombre: string;
+  rol: string;
+  institucion: string;
+}): Promise<string> {
+  const tokenId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      await Sesion.create({
+        tokenId,
+        userId: String(user.id),
+        email: user.email,
+        createdAt: new Date(),
+        expiresAt,
+        revocado: false
+      });
+    } catch (e) {
+      console.warn('Error registrando sesión en MongoDB:', e);
+    }
+  }
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      nombre: user.nombre,
+      rol: user.rol,
+      institucion: user.institucion,
+      tokenId
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+}
+
 function getUserFromToken(req: Request) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.split(' ')[1];
   try {
-    return jwt.verify(token, JWT_SECRET) as any;
+    const payload = jwt.verify(token, JWT_SECRET) as any;
+    return payload;
   } catch (err) {
     return null;
+  }
+}
+
+export async function requireAdmin(req: Request, res: Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(403).json({ success: false, error: 'Acceso denegado: token requerido' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as any;
+    if (!payload || payload.rol !== 'Admin') {
+      return res.status(403).json({ success: false, error: 'Acceso denegado: se requiere rol Admin' });
+    }
+    if (payload.tokenId) {
+      await connectDB();
+      if (isMongoConnected()) {
+        const sesionDoc = await Sesion.findOne({ tokenId: payload.tokenId });
+        if (!sesionDoc || sesionDoc.revocado !== false) {
+          return res.status(403).json({ success: false, error: 'Sesión revocada o inválida' });
+        }
+      }
+    }
+    (req as any).adminUser = payload;
+    return next();
+  } catch (err) {
+    return res.status(403).json({ success: false, error: 'Token inválido o expirado' });
   }
 }
 
@@ -912,11 +1014,13 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         totalAlumnos: 60,
         asistenciaPromedioGeneral: 94.8
       };
-      const token = jwt.sign(
-        { id: user.id, email: user.email, nombre: user.nombre, rol: user.rol, institucion: user.institucion },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
+      const token = await issueSessionToken({
+        id: user.id,
+        email: user.email,
+        nombre: user.nombre,
+        rol: user.rol,
+        institucion: user.institucion
+      });
       return res.json({ success: true, token, user, message: 'Sesión iniciada correctamente' });
     }
 
@@ -924,17 +1028,33 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       if (password !== 'asap2024') {
         return res.status(401).json({ success: false, error: 'Contraseña incorrecta' });
       }
-      const token = jwt.sign(
-        { id: 'docente-1', email: DOCENTE_ACTUAL.email, nombre: DOCENTE_ACTUAL.nombre, rol: DOCENTE_ACTUAL.rol, institucion: DOCENTE_ACTUAL.institucion },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
+      const token = await issueSessionToken({
+        id: 'docente-1',
+        email: DOCENTE_ACTUAL.email,
+        nombre: DOCENTE_ACTUAL.nombre,
+        rol: DOCENTE_ACTUAL.rol,
+        institucion: DOCENTE_ACTUAL.institucion
+      });
       return res.json({ success: true, token, user: DOCENTE_ACTUAL, message: 'Sesión iniciada correctamente' });
     }
     return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
   } catch (error: any) {
+    recordAdminError(req, 500, error?.message || 'Error interno en login');
     return res.status(500).json({ success: false, error: 'Error interno en el servidor' });
   }
+});
+
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  const userPayload = getUserFromToken(req);
+  if (userPayload?.tokenId) {
+    await connectDB();
+    if (isMongoConnected()) {
+      try {
+        await Sesion.updateOne({ tokenId: userPayload.tokenId }, { $set: { revocado: true } });
+      } catch (e) {}
+    }
+  }
+  return res.json({ success: true, message: 'Sesión cerrada correctamente' });
 });
 
 app.post('/api/auth/google', async (req: Request, res: Response) => {
@@ -954,7 +1074,13 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
     materias: dbUser?.materias || ['Lengua y Literatura'],
     avatar: avatar || dbUser?.avatar || DOCENTE_ACTUAL.avatar
   };
-  const token = jwt.sign({ id: user.id, email: user.email, nombre: user.nombre, rol: user.rol, institucion: user.institucion }, JWT_SECRET, { expiresIn: '7d' });
+  const token = await issueSessionToken({
+    id: user.id,
+    email: user.email,
+    nombre: user.nombre,
+    rol: user.rol,
+    institucion: user.institucion
+  });
   res.json({ success: true, token, user, message: 'Sesión iniciada con Google' });
 });
 
@@ -1046,9 +1172,16 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       }
     }
 
-    const token = jwt.sign({ id: createdUser._id.toString(), email: cleanEmail, nombre: createdUser.nombre, rol: createdUser.rol, institucion: createdUser.institucion }, JWT_SECRET, { expiresIn: '7d' });
+    const token = await issueSessionToken({
+      id: createdUser._id.toString(),
+      email: cleanEmail,
+      nombre: createdUser.nombre,
+      rol: createdUser.rol,
+      institucion: createdUser.institucion
+    });
     return res.status(201).json({ success: true, token, user: { id: createdUser._id.toString(), nombre: createdUser.nombre, email: cleanEmail, rol: createdUser.rol, institucion: createdUser.institucion, avatar: DOCENTE_ACTUAL.avatar }, cursosRegistrados: createdParalelos });
   } catch (err: any) {
+    recordAdminError(req, 500, err.message || 'Error en registro');
     return res.status(500).json({ success: false, error: err.message || 'Error en registro' });
   }
 });
@@ -1960,6 +2093,67 @@ app.delete('/api/workspace/documentos/:id', async (req: Request, res: Response) 
   res.json({ success: true });
 });
 
+// ==========================================
+// ADMIN ENDPOINTS (/api/admin/*)
+// ==========================================
+
+// Endpoint público one-time para crear el usuario Admin inicial
+app.post('/api/admin/seed-admin', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const existingAdmin = await Usuario.findOne({ rol: 'Admin' });
+    if (existingAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'El usuario administrador ya existe. Este endpoint se ha deshabilitado automáticamente.'
+      });
+    }
+
+    const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase().trim();
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    const adminNombre = process.env.ADMIN_NOMBRE || 'Administrador ASAP';
+
+    if (!adminEmail || !adminPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Credenciales no configuradas: defina ADMIN_EMAIL y ADMIN_PASSWORD en las variables de entorno.'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const adminUser = await Usuario.findOneAndUpdate(
+      { email: adminEmail },
+      {
+        nombre: adminNombre,
+        email: adminEmail,
+        password: hashedPassword,
+        rol: 'Admin',
+        institucion: 'Administración Central ASAP',
+        materias: []
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Usuario administrador creado correctamente.',
+      admin: {
+        id: adminUser._id.toString(),
+        nombre: adminUser.nombre,
+        email: adminUser.email,
+        rol: adminUser.rol,
+        institucion: adminUser.institucion
+      }
+    });
+  } catch (e: any) {
+    recordAdminError(req, 500, e.message || 'Error en seed-admin');
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Endpoint de migración one-time: normaliza todos los docenteId de Paralelo a string puro
 app.post('/api/admin/fix-docente-ids', async (_req: Request, res: Response) => {
   await connectDB();
@@ -1977,6 +2171,289 @@ app.post('/api/admin/fix-docente-ids', async (_req: Request, res: Response) => {
     return res.json({ success: true, fixed, total: paralelos.length, message: `${fixed} paralelos normalizados de ${paralelos.length} total` });
   } catch (e: any) {
     return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Proteger todos los demás endpoints /api/admin/* con requireAdmin
+app.use('/api/admin', requireAdmin);
+
+app.get('/api/admin/usuarios', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const [usuariosDocs, paralelosDocs] = await Promise.all([
+      Usuario.find({}).select('-password').sort({ createdAt: -1 }),
+      Paralelo.find({})
+    ]);
+
+    const conteoPorDocente: Record<string, number> = {};
+    for (const p of paralelosDocs) {
+      const dId = p.docenteId?.toString();
+      if (dId) {
+        conteoPorDocente[dId] = (conteoPorDocente[dId] || 0) + 1;
+      }
+    }
+
+    const usuarios = usuariosDocs.map((u: any) => {
+      const uid = u._id.toString();
+      return {
+        id: uid,
+        nombre: u.nombre,
+        email: u.email,
+        rol: u.rol,
+        institucion: u.institucion,
+        fechaRegistro: u.createdAt || null,
+        numeroParalelos: conteoPorDocente[uid] || 0
+      };
+    });
+
+    return res.json({ success: true, usuarios });
+  } catch (e: any) {
+    recordAdminError(req, 500, e.message || 'Error listando usuarios');
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/admin/usuarios/:id', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const { id } = req.params;
+    const usuario = await Usuario.findById(id).select('-password');
+    if (!usuario) {
+      return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+    }
+
+    const isObjectId = /^[a-f\d]{24}$/i.test(id);
+    const paraleloQuery = isObjectId
+      ? { $or: [{ docenteId: id }, { docenteId: new mongoose.Types.ObjectId(id) }] }
+      : { docenteId: id };
+
+    const paralelos = await Paralelo.find(paraleloQuery);
+    const paraleloObjectIds = paralelos.map((p: any) => p._id);
+    const paraleloIdStrings = paralelos.map((p: any) => p._id.toString());
+
+    const isAndresLegacy = usuario.email?.toLowerCase().trim() === 'andres.morales@uefdemocracia.edu.ec';
+    const kanbanFilter = isAndresLegacy
+      ? { docenteId: { $in: [id, 'docente-1'] } }
+      : { docenteId: id };
+
+    const [alumnos, actividadesCount, planificacionesCount, documentosCount, kanbanCount] = await Promise.all([
+      paraleloIdStrings.length > 0
+        ? Alumno.find({ paraleloId: { $in: [...paraleloObjectIds, ...paraleloIdStrings] } })
+        : Promise.resolve([]),
+      paraleloIdStrings.length > 0
+        ? Actividad.countDocuments({ paraleloId: { $in: paraleloIdStrings } })
+        : Promise.resolve(0),
+      Planificacion.countDocuments({ docenteId: id }),
+      Documento.countDocuments({ docenteId: id }),
+      KanbanTask.countDocuments(kanbanFilter)
+    ]);
+
+    const alumnosPorParalelo: Record<string, number> = {};
+    for (const a of alumnos) {
+      const pid = a.paraleloId?.toString();
+      if (pid) alumnosPorParalelo[pid] = (alumnosPorParalelo[pid] || 0) + 1;
+    }
+
+    return res.json({
+      success: true,
+      usuario: {
+        id: usuario._id.toString(),
+        nombre: usuario.nombre,
+        email: usuario.email,
+        rol: usuario.rol,
+        institucion: usuario.institucion,
+        materias: usuario.materias || [],
+        telefono: usuario.telefono || '',
+        fechaRegistro: (usuario as any).createdAt || null
+      },
+      paralelos: paralelos.map((p: any) => ({
+        id: p._id.toString(),
+        nombre: p.nombre,
+        grado: p.grado,
+        jornada: p.jornada,
+        nivel: p.nivel,
+        materias: p.materias || [],
+        totalAlumnos: alumnosPorParalelo[p._id.toString()] || 0
+      })),
+      estadisticas: {
+        totalParalelos: paralelos.length,
+        totalAlumnos: alumnos.length,
+        totalActividades: actividadesCount,
+        totalPlanificaciones: planificacionesCount,
+        totalDocumentos: documentosCount,
+        totalKanbanTasks: kanbanCount
+      }
+    });
+  } catch (e: any) {
+    recordAdminError(req, 500, e.message || 'Error obteniendo detalle de usuario');
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete('/api/admin/usuarios/:id', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const { id } = req.params;
+    const userToDelete = await Usuario.findById(id);
+    if (!userToDelete) {
+      return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+    }
+
+    const isObjectId = /^[a-f\d]{24}$/i.test(id);
+    const paraleloQuery = isObjectId
+      ? { $or: [{ docenteId: id }, { docenteId: new mongoose.Types.ObjectId(id) }] }
+      : { docenteId: id };
+
+    const userParalelos = await Paralelo.find(paraleloQuery);
+    const paraleloObjectIds = userParalelos.map((p: any) => p._id);
+    const paraleloIdStrings = userParalelos.map((p: any) => p._id.toString());
+
+    if (paraleloIdStrings.length > 0) {
+      await Promise.all([
+        Alumno.deleteMany({ paraleloId: { $in: [...paraleloObjectIds, ...paraleloIdStrings] } }),
+        Asistencia.deleteMany({ paraleloId: { $in: paraleloIdStrings } }),
+        Calificacion.deleteMany({ paraleloId: { $in: paraleloIdStrings } }),
+        Actividad.deleteMany({ paraleloId: { $in: paraleloIdStrings } })
+      ]);
+    }
+
+    const isAndresLegacy = userToDelete.email?.toLowerCase().trim() === 'andres.morales@uefdemocracia.edu.ec';
+    const kanbanFilter = isAndresLegacy
+      ? { docenteId: { $in: [id, 'docente-1'] } }
+      : { docenteId: id };
+
+    await Promise.all([
+      Paralelo.deleteMany(paraleloQuery),
+      Planificacion.deleteMany({ docenteId: id }),
+      Documento.deleteMany({ docenteId: id }),
+      KanbanTask.deleteMany(kanbanFilter),
+      Sesion.updateMany({ userId: id }, { $set: { revocado: true } })
+    ]);
+
+    await Usuario.findByIdAndDelete(id);
+
+    return res.json({
+      success: true,
+      message: 'Usuario y todos sus datos asociados fueron eliminados en cascada.'
+    });
+  } catch (e: any) {
+    recordAdminError(req, 500, e.message || 'Error eliminando usuario');
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/admin/sistema', async (_req: Request, res: Response) => {
+  await connectDB();
+  const readyState = mongoose.connection.readyState;
+  const readyStateMap: Record<number, string> = {
+    0: 'Desconectado',
+    1: 'Conectado',
+    2: 'Conectando',
+    3: 'Desconectando'
+  };
+
+  return res.json({
+    success: true,
+    mongo: {
+      readyState,
+      estado: readyStateMap[readyState] || 'Desconocido',
+      conectado: readyState === 1
+    },
+    variablesEntorno: {
+      MONGODB_URI: Boolean(process.env.MONGODB_URI && !process.env.MONGODB_URI.includes('usuario:password')),
+      JWT_SECRET: Boolean(process.env.JWT_SECRET),
+      GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
+      ADMIN_EMAIL: Boolean(process.env.ADMIN_EMAIL),
+      ADMIN_PASSWORD: Boolean(process.env.ADMIN_PASSWORD),
+      NODE_ENV: Boolean(process.env.NODE_ENV)
+    },
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+app.get('/api/admin/logs', (_req: Request, res: Response) => {
+  return res.json({
+    success: true,
+    logs: adminLogs.slice(0, 100)
+  });
+});
+
+app.get('/api/admin/sesiones', async (req: Request, res: Response) => {
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      const sesionesDocs = await Sesion.find({
+        revocado: false,
+        expiresAt: { $gt: new Date() }
+      }).sort({ createdAt: -1 });
+
+      return res.json({
+        success: true,
+        sesiones: sesionesDocs.map((s: any) => ({
+          tokenId: s.tokenId,
+          userId: s.userId,
+          email: s.email,
+          createdAt: s.createdAt,
+          expiresAt: s.expiresAt,
+          revocado: s.revocado
+        }))
+      });
+    } catch (e: any) {
+      recordAdminError(req, 500, e.message || 'Error consultando sesiones');
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  return res.json({ success: true, sesiones: [] });
+});
+
+app.delete('/api/admin/sesiones/:tokenId', async (req: Request, res: Response) => {
+  const { tokenId } = req.params;
+
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      await Sesion.updateOne({ tokenId }, { $set: { revocado: true } });
+    } catch (e: any) {
+      recordAdminError(req, 500, e.message || 'Error revocando sesión');
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  return res.json({
+    success: true,
+    message: 'Sesión revocada correctamente'
+  });
+});
+
+// Middleware global de captura de errores para alimentar adminLogs[]
+app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
+  adminLogs.unshift({
+    id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: new Date().toISOString(),
+    method: req.method,
+    route: req.originalUrl || req.url,
+    message: err?.message || 'Error interno del servidor',
+    statusCode: err?.status || err?.statusCode || 500
+  });
+  if (adminLogs.length > 100) {
+    adminLogs.length = 100;
+  }
+  if (!res.headersSent) {
+    res.status(err?.status || err?.statusCode || 500).json({
+      success: false,
+      error: err?.message || 'Error interno del servidor'
+    });
   }
 });
 

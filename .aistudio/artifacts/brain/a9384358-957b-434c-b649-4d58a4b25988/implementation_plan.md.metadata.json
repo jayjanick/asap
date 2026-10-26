@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan integral para solucionar el error de WebSocket HMR de Vite y migrar todos los módulos restantes (Dashboard, Planificaciones, Alumnos y Estadísticas) hacia MongoDB dinámico sin datos estáticos quemados en código.",
-  "updatedAt":  "2026-10-26T08:51:33.048981166Z",
+  "summary":  "Plan de implementación actualizado incluyendo el filtro alternativo docenteId 'docente-1' al eliminar KanbanTask para el usuario legacy andres.morales@uefdemocracia.edu.ec.",
+  "updatedAt":  "2026-10-26T22:21:04.366741595Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
