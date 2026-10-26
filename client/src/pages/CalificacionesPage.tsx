@@ -10,6 +10,7 @@ import {
   Estudiante,
   ActividadInfo
 } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import { StudentProfileModal } from '../components/student/StudentProfileModal';
@@ -31,16 +32,18 @@ import {
 
 export const CalificacionesPage: React.FC = () => {
   const { cursoId } = useParams<{ cursoId: string }>();
+  const { token } = useAuth();
   const [selectedCursoId, setSelectedCursoId] = useState<string>(
     cursoId || PARALELOS_INICIALES[0].id
   );
 
-  const paralelo =
-    PARALELOS_INICIALES.find((p) => p.id === selectedCursoId) ||
-    PARALELOS_INICIALES[0];
+  const [paralelosList, setParalelosList] = useState<any[]>(PARALELOS_INICIALES);
+  const fallbackParalelo = PARALELOS_INICIALES.find((p) => p.id === selectedCursoId) || PARALELOS_INICIALES[0];
+  const [paralelo, setParalelo] = useState<any>(fallbackParalelo);
+  const [estudiantes, setEstudiantes] = useState<Estudiante[]>(fallbackParalelo.estudiantes);
 
   const [actividades, setActividades] = useState<ActividadInfo[]>(
-    ACTIVIDADES_INICIALES.filter((a) => a.paraleloId === paralelo.id)
+    ACTIVIDADES_INICIALES.filter((a) => a.paraleloId === fallbackParalelo.id)
   );
 
   // Matriz de notas inline: [estudianteId][actividadId] = nota (o undefined si está vacía)
@@ -62,25 +65,79 @@ export const CalificacionesPage: React.FC = () => {
   const [informeContenido, setInformeContenido] = useState<any | null>(null);
   const [generandoInforme, setGenerandoInforme] = useState(false);
 
-  // Inicializar notas con valores realistas
+  // Cargar lista de paralelos del usuario desde MongoDB
   useEffect(() => {
-    const currentActs = ACTIVIDADES_INICIALES.filter((a) => a.paraleloId === paralelo.id);
-    setActividades(currentActs);
-
-    const initialMatrix: Record<string, Record<string, number | undefined>> = {};
-    paralelo.estudiantes.forEach((est) => {
-      initialMatrix[est.id] = {};
-      currentActs.forEach((act, actIdx) => {
-        const seed = (est.numeroLista * 7 + actIdx * 11) % 10;
-        let base = 7.0 + (seed / 10) * 2.8;
-        if (est.numeroLista === 5 || est.numeroLista === 13) {
-          base = 5.2 + (seed % 3) * 0.5;
+    fetch(`${API_URL}/api/paralelos`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.paralelos && data.paralelos.length > 0) {
+          setParalelosList(data.paralelos);
+          if (!cursoId) {
+            setSelectedCursoId(data.paralelos[0].id);
+          }
         }
-        initialMatrix[est.id][act.id] = Number(base.toFixed(2));
+      })
+      .catch((e) => console.warn('Usando lista local de paralelos:', e));
+  }, [token, cursoId]);
+
+  // Cargar calificaciones y estudiantes reales de MongoDB para el paralelo seleccionado
+  useEffect(() => {
+    if (!selectedCursoId) return;
+    let isMounted = true;
+
+    fetch(`${API_URL}/api/calificaciones/${selectedCursoId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data?.success) return;
+
+        if (data.paralelo) {
+          setParalelo((prev: any) => ({
+            ...prev,
+            ...data.paralelo,
+            id: data.paralelo.id || selectedCursoId
+          }));
+        }
+
+        if (Array.isArray(data.actividades) && data.actividades.length > 0) {
+          setActividades(data.actividades);
+        }
+
+        if (Array.isArray(data.libroNotas) && data.libroNotas.length > 0) {
+          const loadedEsts: Estudiante[] = data.libroNotas.map((n: any, idx: number) => ({
+            id: n.estudianteId,
+            nombre: n.nombre,
+            cedula: n.cedula || '0900000000',
+            numeroLista: n.numeroLista || idx + 1,
+            activo: true,
+            telefonoRepresentante: '+593 99 123 4567',
+            asistenciaMes: 95,
+            faltasJustificadas: 0,
+            faltasInjustificadas: 0,
+            atrasos: 0,
+            promedioGeneral: n.promedio || 8.0,
+            observaciones: []
+          }));
+          setEstudiantes(loadedEsts);
+
+          const matrix: Record<string, Record<string, number | undefined>> = {};
+          data.libroNotas.forEach((n: any) => {
+            matrix[n.estudianteId] = n.notas || {};
+          });
+          setNotas(matrix);
+        }
+      })
+      .catch((err) => {
+        console.warn('Usando inicialización local de notas:', err);
       });
-    });
-    setNotas(initialMatrix);
-  }, [paralelo]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCursoId, token]);
 
   // Cargar análisis del grupo automáticamente (P3.5)
   useEffect(() => {
@@ -147,13 +204,28 @@ export const CalificacionesPage: React.FC = () => {
       return;
     }
     const num = Math.max(0, Math.min(10, parseFloat(val) || 0));
+    const finalVal = Number(num.toFixed(2));
     setNotas((prev) => ({
       ...prev,
       [estId]: {
         ...prev[estId],
-        [actId]: Number(num.toFixed(2))
+        [actId]: finalVal
       }
     }));
+
+    fetch(`${API_URL}/api/calificaciones/celda`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        paraleloId: selectedCursoId,
+        estudianteId: estId,
+        actividadId: actId,
+        nota: finalVal
+      })
+    }).catch((err) => console.warn('Error guardando celda en MongoDB:', err));
   };
 
   const calcularPromedio = (estId: string) => {
@@ -180,7 +252,7 @@ export const CalificacionesPage: React.FC = () => {
       fechaEntrega: new Date().toISOString().slice(0, 10),
       ponderacion: nuevaPonderacion,
       entregadosCount: 0,
-      totalCount: paralelo.estudiantes.length,
+      totalCount: estudiantes.length,
       estado: 'Por calificar',
       bloque: 2
     };
@@ -189,7 +261,7 @@ export const CalificacionesPage: React.FC = () => {
 
     // Asignar valor por defecto vacío/undefined (P3.4: placeholder '-')
     const updatedNotas = { ...notas };
-    paralelo.estudiantes.forEach((est) => {
+    estudiantes.forEach((est) => {
       if (!updatedNotas[est.id]) updatedNotas[est.id] = {};
       updatedNotas[est.id][nuevaAct.id] = undefined;
     });
@@ -209,7 +281,7 @@ export const CalificacionesPage: React.FC = () => {
       'Promedio'
     ];
 
-    const rows = paralelo.estudiantes.map((est) => [
+    const rows = estudiantes.map((est) => [
       est.numeroLista,
       `"${est.nombre.replace(/"/g, '""')}"`,
       `"${est.cedula}"`,
@@ -241,7 +313,7 @@ export const CalificacionesPage: React.FC = () => {
       'Promedio'
     ];
 
-    const rows = paralelo.estudiantes.map((est) => [
+    const rows = estudiantes.map((est) => [
       est.numeroLista,
       est.nombre,
       est.cedula,
@@ -342,7 +414,7 @@ export const CalificacionesPage: React.FC = () => {
   };
 
   // Estadísticas del paralelo
-  const todosPromedios = paralelo.estudiantes.map((e) => calcularPromedio(e.id));
+  const todosPromedios = estudiantes.map((e) => calcularPromedio(e.id));
   const promedioGeneral = (
     todosPromedios.reduce((a, b) => a + b, 0) / (todosPromedios.length || 1)
   ).toFixed(2);
@@ -416,12 +488,12 @@ export const CalificacionesPage: React.FC = () => {
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-2">
             Paralelo:
           </span>
-          <div className="flex gap-1.5 flex-1">
-            {PARALELOS_INICIALES.map((p) => (
+          <div className="flex gap-1.5 flex-1 flex-wrap">
+            {paralelosList.map((p) => (
               <button
                 key={p.id}
                 onClick={() => setSelectedCursoId(p.id)}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   selectedCursoId === p.id
                     ? 'bg-[#176087] text-white shadow-xs'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
@@ -542,7 +614,7 @@ export const CalificacionesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {paralelo.estudiantes.map((est) => {
+              {estudiantes.map((est) => {
                 const prom = calcularPromedio(est.id);
                 const enRiesgo = prom < 7.0 && prom > 0;
 

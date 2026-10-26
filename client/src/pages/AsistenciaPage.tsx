@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import { PARALELOS_INICIALES, ParaleloInfo } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import {
   UserCheck,
@@ -14,20 +15,31 @@ import {
 } from 'lucide-react';
 
 export const AsistenciaPage: React.FC = () => {
-  const [paralelos, setParalelos] = useState<ParaleloInfo[]>(PARALELOS_INICIALES);
-  const [cargando, setCargando] = useState(false);
+  const { token } = useAuth();
+  const [paralelos, setParalelos] = useState<ParaleloInfo[]>([]);
+  const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
-    // Cargar estado actualizado desde backend
-    fetch(`${API_URL}/api/asistencia`)
+    // Cargar estado actualizado desde backend con token de usuario
+    fetch(`${API_URL}/api/asistencia`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.paralelos) {
+        if (data?.paralelos && data.paralelos.length > 0) {
           setParalelos(data.paralelos);
+        } else if (data?.paralelos) {
+          setParalelos(data.paralelos);
+        } else {
+          setParalelos(PARALELOS_INICIALES);
         }
       })
-      .catch((err) => console.warn('Usando estado local de asistencia:', err));
-  }, []);
+      .catch((err) => {
+        console.warn('Usando estado local de asistencia:', err);
+        setParalelos(PARALELOS_INICIALES);
+      })
+      .finally(() => setCargando(false));
+  }, [token]);
 
   return (
     <div className="space-y-6 text-left">

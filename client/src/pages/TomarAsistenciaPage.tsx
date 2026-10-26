@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import { PARALELOS_INICIALES, Estudiante } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { StudentProfileModal } from '../components/student/StudentProfileModal';
 import {
@@ -27,43 +28,76 @@ interface RegistroEstado {
 
 export const TomarAsistenciaPage: React.FC = () => {
   const { cursoId } = useParams<{ cursoId: string }>();
+  const { token } = useAuth();
   const [activeTab, setActiveTab] = useState<'toma' | 'historial'>('toma');
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
   const [guardadoExitoso, setGuardadoExitoso] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Estudiante | null>(null);
 
-  const paralelo = PARALELOS_INICIALES.find((p) => p.id === cursoId) || PARALELOS_INICIALES[0];
+  const fallbackParalelo = PARALELOS_INICIALES.find((p) => p.id === cursoId) || PARALELOS_INICIALES[0];
+  const [paralelo, setParalelo] = useState<any>(fallbackParalelo);
+  const [estudiantes, setEstudiantes] = useState<Estudiante[]>(fallbackParalelo.estudiantes);
 
   // Estado de registros de asistencia para la fecha seleccionada
   const [registros, setRegistros] = useState<Record<string, RegistroEstado>>({});
 
   useEffect(() => {
-    // Inicializar registros con datos previos o valores por defecto
-    const init: Record<string, RegistroEstado> = {};
-    paralelo.estudiantes.forEach((est, idx) => {
-      let estado: 'P' | 'A' | 'F' = 'P';
-      let justificada = false;
-      let motivo = '';
+    let isMounted = true;
+    if (!cursoId) return;
 
-      if (idx === 4) {
-        estado = 'F';
-        justificada = true;
-        motivo = 'Cita médica en IESS Guayaquil (Certificado presentado)';
-      } else if (idx === 12) {
-        estado = 'A';
-        motivo = 'Llegada 10 min tarde por transporte';
-      }
+    fetch(`${API_URL}/api/asistencia/${cursoId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data?.success) return;
 
-      init[est.id] = {
-        estudianteId: est.id,
-        estado,
-        justificada,
-        motivo
-      };
-    });
-    setRegistros(init);
-  }, [paralelo]);
+        if (data.paralelo) {
+          setParalelo((prev: any) => ({
+            ...prev,
+            ...data.paralelo,
+            id: data.paralelo.id || cursoId
+          }));
+        }
+
+        if (Array.isArray(data.asistenciaHoy) && data.asistenciaHoy.length > 0) {
+          const loadedEstudiantes: Estudiante[] = data.asistenciaHoy.map((a: any, idx: number) => ({
+            id: a.estudianteId || `${cursoId}-est-${idx + 1}`,
+            nombre: a.nombre,
+            cedula: a.cedula || '0900000000',
+            numeroLista: a.numeroLista || idx + 1,
+            activo: true,
+            telefonoRepresentante: a.telefonoRepresentante || '+593 99 123 4567',
+            asistenciaMes: 95,
+            faltasJustificadas: a.faltasJustificadas || 0,
+            faltasInjustificadas: a.faltasInjustificadas || 0,
+            atrasos: a.atrasos || 0,
+            promedioGeneral: 8.5,
+            observaciones: []
+          }));
+          setEstudiantes(loadedEstudiantes);
+
+          const initReg: Record<string, RegistroEstado> = {};
+          data.asistenciaHoy.forEach((a: any) => {
+            initReg[a.estudianteId] = {
+              estudianteId: a.estudianteId,
+              estado: a.estado || 'P',
+              justificada: Boolean(a.justificada),
+              motivo: a.motivo || ''
+            };
+          });
+          setRegistros(initReg);
+        }
+      })
+      .catch((err) => {
+        console.warn('Usando fallback para estudiantes de asistencia:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cursoId, token]);
 
   const handleEstadoChange = (estId: string, estado: 'P' | 'A' | 'F') => {
     setRegistros((prev) => ({
@@ -132,7 +166,7 @@ export const TomarAsistenciaPage: React.FC = () => {
   };
 
   // Cálculo de conteos con palabras completas (P3.3)
-  const total = paralelo.estudiantes.length;
+  const total = estudiantes.length;
   const presentes = Object.values(registros).filter((r) => r.estado === 'P').length;
   const atrasos = Object.values(registros).filter((r) => r.estado === 'A').length;
   const faltas = Object.values(registros).filter((r) => r.estado === 'F').length;
@@ -291,7 +325,7 @@ export const TomarAsistenciaPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {paralelo.estudiantes.map((est) => {
+                  {estudiantes.map((est) => {
                     const reg = registros[est.id] || { estado: 'P', justificada: false, motivo: '' };
 
                     return (
@@ -426,7 +460,7 @@ export const TomarAsistenciaPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {paralelo.estudiantes.map((est) => {
+                {estudiantes.map((est) => {
                   const totalDias = 20;
                   const totalFaltas = (est.faltasJustificadas || 0) + (est.faltasInjustificadas || 0);
                   const porcentajeFaltas = Number(((totalFaltas / totalDias) * 100).toFixed(1));

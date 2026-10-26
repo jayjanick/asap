@@ -338,12 +338,7 @@ function isMongoConnected() {
   return mongoose.connection.readyState === 1;
 }
 async function ensureDbConnected() {
-  const connected = await connectDB();
-  if (connected) {
-    await seedDatabase(false).catch(() => {
-    });
-  }
-  return connected;
+  return connectDB();
 }
 var UsuarioSchema = new Schema(
   {
@@ -462,6 +457,32 @@ var KanbanTaskSchema = new Schema(
   { timestamps: true }
 );
 var KanbanTask = mongoose.models.KanbanTask || mongoose.model("KanbanTask", KanbanTaskSchema);
+var PlanificacionSchema = new Schema(
+  {
+    docenteId: { type: String, default: "docente-1" },
+    paraleloId: { type: String },
+    materia: { type: String, required: true },
+    bloque: { type: Number, default: 2 },
+    titulo: { type: String, required: true },
+    destreza: { type: String, default: "" },
+    semanas: { type: Number, default: 4 },
+    progreso: { type: Number, default: 0 },
+    estado: { type: String, default: "Por iniciar" },
+    generadaIA: { type: Boolean, default: false },
+    objetivos: [{ type: String }],
+    recursos: [{ type: String }],
+    criteriosEvaluacion: [{ type: String }],
+    secuenciaClases: [{
+      semana: Number,
+      tema: String,
+      contenido: String,
+      actividad: String,
+      actividadSugerida: String
+    }]
+  },
+  { timestamps: true }
+);
+var Planificacion = mongoose.models.Planificacion || mongoose.model("Planificacion", PlanificacionSchema);
 async function seedDatabase(force = false) {
   const connected = await connectDB();
   if (!connected) return;
@@ -517,6 +538,25 @@ async function seedDatabase(force = false) {
           force ? alumnoData : { $setOnInsert: alumnoData },
           { upsert: true }
         );
+      }
+    }
+    const planCount = await Planificacion.countDocuments({ docenteId: docente._id.toString() });
+    if (planCount === 0) {
+      for (const plan of PLANIFICACIONES_MINEDUC) {
+        await Planificacion.create({
+          docenteId: docente._id.toString(),
+          materia: plan.materia,
+          bloque: plan.bloque,
+          titulo: plan.titulo,
+          destreza: plan.destreza,
+          semanas: plan.semanas,
+          progreso: plan.progreso,
+          estado: plan.estado,
+          generadaIA: plan.generadaIA,
+          objetivos: plan.objetivos,
+          recursos: plan.recursos,
+          secuenciaClases: plan.secuenciaClases
+        });
       }
     }
   } catch (err) {
@@ -967,18 +1007,116 @@ app.post("/api/auth/register", async (req, res) => {
     return res.status(500).json({ success: false, error: err.message || "Error en registro" });
   }
 });
-app.get("/api/dashboard", async (_req, res) => {
+app.get("/api/dashboard", async (req, res) => {
   let actividadesPendientes = 0;
   await connectDB();
   if (isMongoConnected()) {
     try {
-      actividadesPendientes = await Actividad.countDocuments({ estado: "Por calificar" });
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id;
+      let docenteObj = { ...DOCENTE_ACTUAL };
+      let totalEstudiantes = 0;
+      let paralelosNombres = [];
+      let claseActual = null;
+      let misParalelos = [];
+      let asistenciaMes = 95;
+      if (docenteId) {
+        const docenteIdStr = String(docenteId);
+        const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
+        const query = isObjectId ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] } : { docenteId: docenteIdStr };
+        misParalelos = await Paralelo.find(query);
+        paralelosNombres = misParalelos.map((p) => p.nombre);
+        const dbUser = await Usuario.findById(docenteId) || await Usuario.findOne({ email: userPayload?.email });
+        if (dbUser) {
+          docenteObj = {
+            id: dbUser._id.toString(),
+            nombre: dbUser.nombre,
+            email: dbUser.email,
+            rol: dbUser.rol,
+            institucion: dbUser.institucion,
+            materias: dbUser.materias || ["Lengua y Literatura"],
+            avatar: dbUser.avatar || DOCENTE_ACTUAL.avatar,
+            distrito: "Distrito 09D04 \xB7 Guayaquil Centro",
+            provincia: "Guayas",
+            canton: "Guayaquil",
+            totalAlumnos: 0,
+            asistenciaPromedioGeneral: 100
+          };
+        }
+        const paraleloIds = misParalelos.map((p) => p._id.toString());
+        if (paraleloIds.length > 0) {
+          totalEstudiantes = await Alumno.countDocuments({ paraleloId: { $in: paraleloIds } });
+          actividadesPendientes = await Actividad.countDocuments({
+            paraleloId: { $in: paraleloIds },
+            estado: "Por calificar"
+          });
+          const asistencias = await Asistencia.find({ paraleloId: { $in: paraleloIds } });
+          if (asistencias.length > 0) {
+            let totalRegs = 0;
+            let presentes = 0;
+            asistencias.forEach((a) => {
+              (a.registros || []).forEach((r) => {
+                totalRegs++;
+                if (r.estado === "P" || r.justificada) presentes++;
+              });
+            });
+            if (totalRegs > 0) {
+              asistenciaMes = Number((presentes / totalRegs * 100).toFixed(1));
+            }
+          }
+          const primerParalelo = misParalelos[0];
+          claseActual = {
+            paralelo: primerParalelo.nombre,
+            materia: primerParalelo.materia || primerParalelo.materias?.[0] || "General",
+            aula: "Bloque B \xB7 Aula 204",
+            horario: "07:15 a 08:45",
+            tema: "Ensayo argumentativo"
+          };
+        }
+      }
+      if (misParalelos.length === 0) {
+        totalEstudiantes = 60;
+        paralelosNombres = ['8vo EGB "A"', '9no EGB "B"'];
+        actividadesPendientes = await Actividad.countDocuments({ estado: "Por calificar" }).catch(() => 5);
+        claseActual = {
+          paralelo: '8vo EGB "A"',
+          materia: "Lengua y Literatura",
+          aula: "Bloque B \xB7 Aula 204",
+          horario: "07:15 a 08:45",
+          tema: "Ensayo argumentativo"
+        };
+      }
+      docenteObj.totalAlumnos = totalEstudiantes;
+      docenteObj.asistenciaPromedioGeneral = asistenciaMes;
+      const smartTodo2 = await sugerirTareasTodo({
+        actividadesSinCalificar: actividadesPendientes,
+        planificacionesPorIniciar: 1,
+        asistenciaPendienteHoy: true,
+        paralelosNombres: paralelosNombres.length > 0 ? paralelosNombres : ['8vo EGB "A"']
+      });
+      return res.json({
+        success: true,
+        docente: docenteObj,
+        resumenHoy: {
+          fecha: (/* @__PURE__ */ new Date()).toLocaleDateString("es-EC", { weekday: "long", year: "numeric", month: "long", day: "numeric" }),
+          jornada: "Matutina (07:15 - 12:45)",
+          claseActual
+        },
+        estadisticas: {
+          totalEstudiantes,
+          actividadesPorCalificar: actividadesPendientes,
+          clasesPlanificadasSemana: Math.max(misParalelos.length * 4, 14),
+          asistenciaPromedioMes: asistenciaMes,
+          informesGenerados: 3
+        },
+        porHacerInteligente: smartTodo2,
+        ultimasActividades: [{ id: "1", accion: "Asistencia registrada", detalle: paralelosNombres[0] || '8vo EGB "A"', tiempo: "Hace 45 min" }]
+      });
     } catch (e) {
-      actividadesPendientes = actividadesState.filter((a) => a.estado === "Por calificar").length;
+      console.warn("Error calculando dashboard desde MongoDB:", e);
     }
-  } else {
-    actividadesPendientes = actividadesState.filter((a) => a.estado === "Por calificar").length;
   }
+  actividadesPendientes = actividadesState.filter((a) => a.estado === "Por calificar").length;
   const smartTodo = await sugerirTareasTodo({
     actividadesSinCalificar: actividadesPendientes,
     planificacionesPorIniciar: 1,
@@ -1005,7 +1143,10 @@ app.get("/api/paralelos", async (req, res) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id;
       if (!docenteId) return res.json({ success: true, paralelos: [] });
-      const paralelos = await Paralelo.find({ docenteId: String(docenteId) });
+      const docenteIdStr = String(docenteId);
+      const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
+      const query = isObjectId ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] } : { docenteId: docenteIdStr };
+      const paralelos = await Paralelo.find(query);
       return res.json({
         success: true,
         paralelos: paralelos.map((p) => ({
@@ -1048,7 +1189,10 @@ app.get("/api/asistencia", async (req, res) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id;
       if (!docenteId) return res.json({ success: true, paralelos: [] });
-      const paralelos = await Paralelo.find({ docenteId: String(docenteId) });
+      const docenteIdStr = String(docenteId);
+      const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
+      const query = isObjectId ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] } : { docenteId: docenteIdStr };
+      const paralelos = await Paralelo.find(query);
       return res.json({
         success: true,
         paralelos: paralelos.map((p) => ({
@@ -1477,7 +1621,39 @@ app.post("/api/ai/informe", async (req, res) => {
   });
   res.json({ success: true, informe });
 });
-app.get("/api/planificacion", (_req, res) => {
+app.get("/api/planificacion", async (req, res) => {
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || "docente-1";
+      const plans = await Planificacion.find({ docenteId }).sort({ createdAt: -1 });
+      if (plans && plans.length > 0) {
+        return res.json({
+          success: true,
+          planificaciones: plans.map((p) => ({
+            id: p._id.toString(),
+            docenteId: p.docenteId,
+            paraleloId: p.paraleloId,
+            materia: p.materia,
+            bloque: p.bloque,
+            titulo: p.titulo,
+            destreza: p.destreza,
+            semanas: p.semanas,
+            progreso: p.progreso,
+            estado: p.estado,
+            generadaIA: p.generadaIA,
+            objetivos: p.objetivos || [],
+            recursos: p.recursos || [],
+            criteriosEvaluacion: p.criteriosEvaluacion || [],
+            secuenciaClases: p.secuenciaClases || []
+          }))
+        });
+      }
+    } catch (e) {
+      console.warn("Error leyendo planificaciones de MongoDB:", e);
+    }
+  }
   res.json({ success: true, planificaciones: planificacionesState });
 });
 app.post("/api/planificacion/generar-ia", async (req, res) => {
@@ -1491,12 +1667,104 @@ app.post("/api/planificacion/generar-ia", async (req, res) => {
   });
   res.json({ success: true, plan });
 });
-app.post("/api/planificacion", (req, res) => {
-  const nuevoPlan = { id: `plan-${Date.now()}`, progreso: 0, estado: "Por iniciar", generadaIA: true, ...req.body };
+app.post("/api/planificacion", async (req, res) => {
+  const userPayload = getUserFromToken(req);
+  const docenteId = userPayload?.id || "docente-1";
+  const nuevoPlan = {
+    id: `plan-${Date.now()}`,
+    docenteId,
+    progreso: 0,
+    estado: "Por iniciar",
+    generadaIA: true,
+    ...req.body
+  };
   planificacionesState.push(nuevoPlan);
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      const created = await Planificacion.create({
+        docenteId,
+        paraleloId: req.body.paraleloId,
+        materia: req.body.materia || "Lengua y Literatura",
+        bloque: Number(req.body.bloque) || 2,
+        titulo: req.body.titulo || "Nueva Planificaci\xF3n",
+        destreza: req.body.destreza || "",
+        semanas: Number(req.body.semanas) || 4,
+        progreso: req.body.progreso || 0,
+        estado: req.body.estado || "Por iniciar",
+        generadaIA: Boolean(req.body.generadaIA),
+        objetivos: req.body.objetivos || [],
+        recursos: req.body.recursos || [],
+        criteriosEvaluacion: req.body.criteriosEvaluacion || [],
+        secuenciaClases: req.body.secuenciaClases || []
+      });
+      return res.status(201).json({
+        success: true,
+        plan: {
+          id: created._id.toString(),
+          ...created.toObject()
+        }
+      });
+    } catch (e) {
+      console.warn("Error guardando planificaci\xF3n en MongoDB:", e);
+    }
+  }
   res.status(201).json({ success: true, plan: nuevoPlan });
 });
-app.get("/api/workspace", (_req, res) => {
+app.get("/api/workspace", async (req, res) => {
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || "docente-1";
+      const [tasks, docs, acts] = await Promise.all([
+        KanbanTask.find({ docenteId }).sort({ createdAt: -1 }),
+        Documento.find({ docenteId }).sort({ createdAt: -1 }),
+        Actividad.find().sort({ createdAt: -1 })
+      ]);
+      return res.json({
+        success: true,
+        kanbanTasks: tasks.map((t) => ({
+          id: t._id.toString(),
+          titulo: t.titulo,
+          descripcion: t.descripcion,
+          paralelo: t.paralelo,
+          columna: t.columna,
+          prioridad: t.prioridad,
+          urgencia: t.urgencia,
+          fecha: t.fecha,
+          fechaLimite: t.fechaLimite,
+          observaciones: t.observaciones,
+          adjuntos: t.adjuntos || []
+        })),
+        plantillas: PLANTILLAS_MINEDUC,
+        actividades: acts.length > 0 ? acts.map((a) => ({
+          id: a._id.toString(),
+          paraleloId: a.paraleloId,
+          titulo: a.titulo,
+          tipo: a.tipo,
+          fechaEntrega: a.fechaEntrega,
+          ponderacion: a.ponderacion,
+          entregadosCount: a.entregadosCount,
+          totalCount: a.totalCount,
+          estado: a.estado,
+          bloque: a.bloque,
+          descripcion: a.descripcion
+        })) : actividadesState,
+        documentos: docs.length > 0 ? docs.map((d) => ({
+          id: d._id.toString(),
+          nombre: d.nombre,
+          categoria: d.categoria,
+          descripcion: d.descripcion,
+          tamano: d.tamano,
+          tipo: d.tipo,
+          fechaSubida: d.fechaSubida,
+          url: d.url
+        })) : documentosState
+      });
+    } catch (e) {
+    }
+  }
   res.json({ success: true, kanbanTasks, plantillas: PLANTILLAS_MINEDUC, actividades: actividadesState, documentos: documentosState });
 });
 app.get("/api/workspace/documentos", async (req, res) => {
@@ -1552,6 +1820,24 @@ app.delete("/api/workspace/documentos/:id", async (req, res) => {
   }
   documentosState = documentosState.filter((d) => d.id !== id);
   res.json({ success: true });
+});
+app.post("/api/admin/fix-docente-ids", async (_req, res) => {
+  await connectDB();
+  if (!isMongoConnected()) return res.status(503).json({ error: "MongoDB no conectado" });
+  try {
+    const paralelos = await Paralelo.find({});
+    let fixed = 0;
+    for (const p of paralelos) {
+      const asString = p.docenteId?.toString();
+      if (asString && p.docenteId !== asString) {
+        await Paralelo.updateOne({ _id: p._id }, { $set: { docenteId: asString } });
+        fixed++;
+      }
+    }
+    return res.json({ success: true, fixed, total: paralelos.length, message: `${fixed} paralelos normalizados de ${paralelos.length} total` });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
 });
 var index_default = app;
 export {

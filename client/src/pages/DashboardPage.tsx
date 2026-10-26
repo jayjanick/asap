@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { API_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
@@ -22,10 +23,56 @@ import {
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
-  const { user, institucionActiva } = useAuth();
+  const { user, token, institucionActiva } = useAuth();
   const [searchParams] = useSearchParams();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [paralelosList, setParalelosList] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchDashboard = async () => {
+      try {
+        const [dashRes, parRes] = await Promise.all([
+          fetch(`${API_URL}/api/dashboard`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          }),
+          fetch(`${API_URL}/api/paralelos`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          })
+        ]);
+        if (dashRes.ok) {
+          const dData = await dashRes.json();
+          if (dData.success) {
+            setDashboardData(dData);
+            if (Array.isArray(dData.porHacerInteligente) && dData.porHacerInteligente.length > 0) {
+              setTodoList(
+                dData.porHacerInteligente.map((t: any, i: number) => ({
+                  id: `t-smart-${i}`,
+                  titulo: t.titulo || t.texto || t,
+                  urgencia: t.urgencia || 'Media',
+                  fechaLimite: t.fechaLimite || new Date().toISOString().slice(0, 10),
+                  observaciones: t.observaciones || t.motivo || 'Generado por análisis del paralelo.',
+                  modulo: t.modulo || 'Asistencia',
+                  link: t.link || '/asistencia',
+                  completada: false
+                }))
+              );
+            }
+          }
+        }
+        if (parRes.ok) {
+          const pData = await parRes.json();
+          if (pData.success && Array.isArray(pData.paralelos)) {
+            setParalelosList(pData.paralelos);
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching dashboard from API:', err);
+      }
+    };
+    fetchDashboard();
+  }, [token]);
 
   // Formulario de tarea con urgencia, fecha límite y observaciones (P3.2)
   const [nuevaTareaTitulo, setNuevaTareaTitulo] = useState('');
@@ -300,11 +347,11 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-2.5">
-            <Link to="/asistencia/par-9no-b">
+            <Link to={paralelosList[0] ? `/asistencia/${paralelosList[0].id}` : '/asistencia'}>
               <Button variant="primary" size="md" className="w-full justify-between">
                 <span className="flex items-center gap-2">
                   <UserCheck className="w-4 h-4" />
-                  Tomar asistencia hoy (9no B)
+                  Tomar asistencia hoy ({paralelosList[0]?.nombre || 'Paralelo'})
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
@@ -343,15 +390,19 @@ export const DashboardPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* 2. STATS RÁPIDAS (P3.2: Reemplazadas por Clases Esta Semana y Actividades por Calificar) */}
+      {/* 2. STATS RÁPIDAS (Dinámicas desde MongoDB) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <Card className="p-4">
           <div className="flex items-center justify-between text-slate-500">
             <span className="text-xs font-medium">Clases Esta Semana</span>
             <Calendar className="w-4 h-4 text-[#176087]" />
           </div>
-          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">14</div>
-          <span className="text-[11px] text-slate-400">10 dictadas · 4 por dictar</span>
+          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">
+            {dashboardData?.estadisticas?.clasesPlanificadasSemana ?? (paralelosList.length * 4 || 14)}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {paralelosList.length > 0 ? `${paralelosList.length} paralelos asignados` : '10 dictadas · 4 por dictar'}
+          </span>
         </Card>
 
         <Card className="p-4">
@@ -359,8 +410,12 @@ export const DashboardPage: React.FC = () => {
             <span className="text-xs font-medium">Actividades por Calificar</span>
             <Clock className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="text-2xl font-black font-mono text-amber-600 mt-1">5</div>
-          <span className="text-[11px] text-slate-400">En 8vo A y 9no B</span>
+          <div className="text-2xl font-black font-mono text-amber-600 mt-1">
+            {dashboardData?.estadisticas?.actividadesPorCalificar ?? 0}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {paralelosList.length > 0 ? `En ${paralelosList.map((p: any) => p.nombre).slice(0, 2).join(' y ')}` : 'Sin tareas pendientes'}
+          </span>
         </Card>
 
         <Card className="p-4">
@@ -368,8 +423,12 @@ export const DashboardPage: React.FC = () => {
             <span className="text-xs font-medium">% Asistencia del Mes</span>
             <TrendingUp className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-2xl font-black font-mono text-emerald-600 mt-1">94.8%</div>
-          <span className="text-[11px] text-slate-400">60 estudiantes activos</span>
+          <div className="text-2xl font-black font-mono text-emerald-600 mt-1">
+            {dashboardData?.estadisticas?.asistenciaPromedioMes ? `${dashboardData.estadisticas.asistenciaPromedioMes}%` : '95.0%'}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {dashboardData?.estadisticas?.totalEstudiantes ?? user?.totalAlumnos ?? (paralelosList.length * 30)} estudiantes activos
+          </span>
         </Card>
 
         <Card className="p-4">
@@ -377,8 +436,12 @@ export const DashboardPage: React.FC = () => {
             <span className="text-xs font-medium">Unidades PUD Activas</span>
             <BookOpenCheck className="w-4 h-4 text-[#176087]" />
           </div>
-          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">2</div>
-          <span className="text-[11px] text-slate-400">Bloques 1 y 2 en curso</span>
+          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">
+            {dashboardData?.estadisticas?.informesGenerados ?? 2}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            Planificaciones curriculares
+          </span>
         </Card>
       </div>
 

@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan to replace memory arrays with MongoDB queries and add Mongoose schemas for Asistencia, Calificacion, Actividad, and KanbanTask in api/index.ts with memory fallbacks.",
-  "updatedAt":  "2026-10-26T06:42:36.842832497Z",
+  "summary":  "Plan integral para solucionar el error de WebSocket HMR de Vite y migrar todos los módulos restantes (Dashboard, Planificaciones, Alumnos y Estadísticas) hacia MongoDB dinámico sin datos estáticos quemados en código.",
+  "updatedAt":  "2026-10-26T08:51:33.048981166Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

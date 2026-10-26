@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_URL } from '../config/api';
+import { useAuth } from '../context/AuthContext';
 import {
   DndContext,
   closestCorners,
@@ -194,6 +195,7 @@ const KanbanColumn: React.FC<{
 };
 
 export const WorkspacePage: React.FC = () => {
+  const { token } = useAuth();
   // P0.3: Navegación interna exclusiva por estado local (sin cambiar la URL)
   const [activeTab, setActiveTab] = useState<'kanban' | 'plantillas' | 'documentos'>('kanban');
 
@@ -323,14 +325,16 @@ export const WorkspacePage: React.FC = () => {
 
   // Cargar tareas y documentos del servidor al iniciar
   useEffect(() => {
-    fetch(`${API_URL}/api/workspace/kanban`)
+    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+    fetch(`${API_URL}/api/workspace/kanban`, { headers: authHeaders })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.kanbanTasks) setTasks(data.kanbanTasks);
       })
       .catch(() => {});
 
-    fetch(`${API_URL}/api/workspace/documentos`)
+    fetch(`${API_URL}/api/workspace/documentos`, { headers: authHeaders })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.documentos && Array.isArray(data.documentos)) {
@@ -342,7 +346,7 @@ export const WorkspacePage: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [token]);
 
   // Manejador de Drag End en Kanban (P3.9)
   const handleDragEnd = (event: DragEndEvent) => {
@@ -360,7 +364,10 @@ export const WorkspacePage: React.FC = () => {
       // Sincronizar con servidor
       fetch(`${API_URL}/api/workspace/kanban/${activeId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ columna: overId })
       }).catch(() => {});
       return;
@@ -374,7 +381,10 @@ export const WorkspacePage: React.FC = () => {
       );
       fetch(`${API_URL}/api/workspace/kanban/${activeId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ columna: overTask.columna })
       }).catch(() => {});
     }
@@ -401,11 +411,22 @@ export const WorkspacePage: React.FC = () => {
     setTasks([newTask, ...tasks]);
 
     try {
-      await fetch(`${API_URL}/api/workspace/kanban`, {
+      const res = await fetch(`${API_URL}/api/workspace/kanban`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(newTask)
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tarea) {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === newTask.id ? { ...t, id: data.tarea.id || data.tarea._id } : t))
+          );
+        }
+      }
     } catch {}
 
     setNewTitle('');
@@ -424,7 +445,10 @@ export const WorkspacePage: React.FC = () => {
     try {
       await fetch(`${API_URL}/api/workspace/kanban/${selectedTask.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(selectedTask)
       });
     } catch {}
@@ -437,7 +461,10 @@ export const WorkspacePage: React.FC = () => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
     setSelectedTask(null);
     try {
-      await fetch(`${API_URL}/api/workspace/kanban/${id}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/api/workspace/kanban/${id}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
     } catch {}
   };
 
@@ -583,11 +610,22 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
     setDocumentos([nuevoDoc, ...documentos]);
 
     try {
-      await fetch(`${API_URL}/api/workspace/documentos`, {
+      const res = await fetch(`${API_URL}/api/workspace/documentos`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(nuevoDoc)
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.documento) {
+          setDocumentos((prev) =>
+            prev.map((d) => (d.id === nuevoDoc.id ? { ...d, id: String(data.documento.id || data.documento._id) } : d))
+          );
+        }
+      }
     } catch {}
 
     setUploadNombre('');
@@ -628,7 +666,10 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
   const handleEliminarDocumento = async (id: string) => {
     setDocumentos((prev) => prev.filter((d) => d.id !== id));
     try {
-      await fetch(`${API_URL}/api/workspace/documentos/${id}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/api/workspace/documentos/${id}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
     } catch {}
   };
 

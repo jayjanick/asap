@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { API_URL } from '../config/api';
+import { useAuth } from '../context/AuthContext';
 import { PLANIFICACIONES_MINEDUC, PlanificacionUnidad } from '../data/mockData';
 import { Card, Button, Badge, InfoTooltip } from '../components/ui';
 import { Drawer } from '../components/ui/Dialogs';
@@ -20,9 +21,29 @@ import {
 } from 'lucide-react';
 
 export const PlanificacionPage: React.FC = () => {
+  const { token } = useAuth();
   const [planificaciones, setPlanificaciones] = useState<PlanificacionUnidad[]>(PLANIFICACIONES_MINEDUC);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedPlanDetail, setSelectedPlanDetail] = useState<PlanificacionUnidad | null>(null);
+
+  useEffect(() => {
+    const fetchPlanificaciones = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/planificacion`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.planificaciones) && data.planificaciones.length > 0) {
+            setPlanificaciones(data.planificaciones);
+          }
+        }
+      } catch (err) {
+        console.warn('Error cargando planificaciones desde API:', err);
+      }
+    };
+    fetchPlanificaciones();
+  }, [token]);
 
   // Formulario del Drawer de IA
   const [materia, setMateria] = useState('Lengua y Literatura');
@@ -85,7 +106,7 @@ export const PlanificacionPage: React.FC = () => {
     }
   };
 
-  const handleGuardarPlan = () => {
+  const handleGuardarPlan = async () => {
     if (!resultadoIA) return;
     const nuevoPlan: PlanificacionUnidad = {
       id: `plan-${Date.now()}`,
@@ -102,9 +123,30 @@ export const PlanificacionPage: React.FC = () => {
       secuenciaClases: resultadoIA.secuenciaClases || []
     };
 
-    setPlanificaciones([...planificaciones, nuevoPlan]);
+    setPlanificaciones((prev) => [...prev, nuevoPlan]);
     setDrawerOpen(false);
     setResultadoIA(null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/planificacion`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(nuevoPlan)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.plan) {
+          setPlanificaciones((prev) =>
+            prev.map((p) => (p.id === nuevoPlan.id ? { ...p, id: data.plan.id || data.plan._id } : p))
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('Error persistiendo plan curricular en MongoDB:', err);
+    }
   };
 
   return (
