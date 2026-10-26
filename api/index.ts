@@ -443,7 +443,8 @@ const KanbanTaskSchema = new Schema(
     fecha: { type: String },
     fechaLimite: { type: String },
     observaciones: { type: String },
-    adjuntos: [{ type: String }]
+    adjuntos: [{ type: String }],
+    docenteId: { type: String, default: 'docente-1' }
   },
   { timestamps: true }
 );
@@ -1379,11 +1380,13 @@ app.post('/api/calificaciones/actividad', async (req: Request, res: Response) =>
 });
 
 // 6. GET /api/workspace/kanban y métodos (POST, PUT, DELETE)
-app.get('/api/workspace/kanban', async (_req: Request, res: Response) => {
+app.get('/api/workspace/kanban', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const tasks = await KanbanTask.find().sort({ createdAt: -1 });
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || 'docente-1';
+      const tasks = await KanbanTask.find({ docenteId }).sort({ createdAt: -1 });
       if (tasks && tasks.length > 0) {
         return res.json({
           success: true,
@@ -1416,6 +1419,8 @@ app.post('/api/workspace/kanban', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || 'docente-1';
       const newTask = await KanbanTask.create({
         titulo: titulo || 'Nueva Tarea',
         descripcion: descripcion || '',
@@ -1426,7 +1431,8 @@ app.post('/api/workspace/kanban', async (req: Request, res: Response) => {
         fecha: fechaHoy,
         fechaLimite: fechaLimite || '',
         observaciones: observaciones || '',
-        adjuntos: []
+        adjuntos: [],
+        docenteId
       });
       return res.status(201).json({
         success: true,
@@ -1473,25 +1479,30 @@ app.put('/api/workspace/kanban/:id', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected() && id.match(/^[0-9a-fA-F]{24}$/)) {
     try {
-      const updated = await KanbanTask.findByIdAndUpdate(id, req.body, { new: true });
-      if (updated) {
-        return res.json({
-          success: true,
-          tarea: {
-            id: updated._id.toString(),
-            titulo: updated.titulo,
-            descripcion: updated.descripcion,
-            paralelo: updated.paralelo,
-            columna: updated.columna,
-            prioridad: updated.prioridad,
-            urgencia: updated.urgencia,
-            fecha: updated.fecha,
-            fechaLimite: updated.fechaLimite,
-            observaciones: updated.observaciones,
-            adjuntos: updated.adjuntos
-          }
-        });
-      }
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || 'docente-1';
+      const updated = await KanbanTask.findOneAndUpdate(
+        { _id: id, docenteId },
+        req.body,
+        { new: true }
+      );
+      if (!updated) return res.status(404).json({ success: false, error: 'Tarea no encontrada' });
+      return res.json({
+        success: true,
+        tarea: {
+          id: updated._id.toString(),
+          titulo: updated.titulo,
+          descripcion: updated.descripcion,
+          paralelo: updated.paralelo,
+          columna: updated.columna,
+          prioridad: updated.prioridad,
+          urgencia: updated.urgencia,
+          fecha: updated.fecha,
+          fechaLimite: updated.fechaLimite,
+          observaciones: updated.observaciones,
+          adjuntos: updated.adjuntos
+        }
+      });
     } catch (err) {
       console.warn('Error actualizando tarea Kanban en MongoDB:', err);
     }
@@ -1510,7 +1521,10 @@ app.delete('/api/workspace/kanban/:id', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected() && id.match(/^[0-9a-fA-F]{24}$/)) {
     try {
-      await KanbanTask.findByIdAndDelete(id);
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || 'docente-1';
+      const deleted = await KanbanTask.findOneAndDelete({ _id: id, docenteId });
+      if (!deleted) return res.status(404).json({ success: false, error: 'Tarea no encontrada' });
       return res.json({ success: true, message: 'Eliminada de MongoDB' });
     } catch (err) {}
   }
