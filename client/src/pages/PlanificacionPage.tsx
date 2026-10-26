@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
-import { PLANIFICACIONES_MINEDUC, PlanificacionUnidad } from '../data/mockData';
-import { Card, Button, Badge, InfoTooltip } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
+import type { PlanificacionUnidad } from '../data/mockData';
 import { Drawer } from '../components/ui/Dialogs';
 import {
   BookOpenCheck,
@@ -22,28 +22,25 @@ import {
 
 export const PlanificacionPage: React.FC = () => {
   const { token } = useAuth();
-  const [planificaciones, setPlanificaciones] = useState<PlanificacionUnidad[]>(PLANIFICACIONES_MINEDUC);
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [planificaciones, setPlanificaciones] = useState<PlanificacionUnidad[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedPlanDetail, setSelectedPlanDetail] = useState<PlanificacionUnidad | null>(null);
 
   useEffect(() => {
-    const fetchPlanificaciones = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/planificacion`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.planificaciones) && data.planificaciones.length > 0) {
-            setPlanificaciones(data.planificaciones);
-          }
+    fetch(`${API_URL}/api/planificacion`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
+        if (d?.planificaciones && Array.isArray(d.planificaciones)) {
+          setPlanificaciones(d.planificaciones);
         }
-      } catch (err) {
-        console.warn('Error cargando planificaciones desde API:', err);
-      }
-    };
-    fetchPlanificaciones();
-  }, [token]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   // Formulario del Drawer de IA
   const [materia, setMateria] = useState('Lengua y Literatura');
@@ -149,6 +146,9 @@ export const PlanificacionPage: React.FC = () => {
     }
   };
 
+  if (loading) return <Skeleton className="h-[500px] w-full" />;
+  if (!data) return <EmptyState mensaje="No hay datos aún" />;
+
   return (
     <div className="space-y-6 text-left">
       {/* Header */}
@@ -178,134 +178,85 @@ export const PlanificacionPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bloques Curriculares Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {planificaciones.map((plan) => {
-          const isEnCurso = plan.estado === 'En curso';
-          const isCompletado = plan.estado === 'Completado';
+      {/* Bloques Curriculares Grid / Empty State */}
+      {planificaciones.length === 0 ? (
+        <EmptyState
+          mensaje="Aún no has creado planificaciones"
+          submensaje="Crea tu primera unidad microcurricular PUD asistida por IA alineada al currículo nacional ecuatoriano."
+          accionTexto="Nueva planificación con IA"
+          onAccion={() => setDrawerOpen(true)}
+          icon={<BookOpenCheck className="w-12 h-12 text-slate-400" />}
+          className="py-16"
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {planificaciones.map((plan) => {
+            const isEnCurso = plan.estado === 'En curso';
+            const isCompletado = plan.estado === 'Completado';
 
-          return (
-            <Card
-              key={plan.id}
-              className="p-6 flex flex-col justify-between hover:shadow-xl transition-all border-slate-200 dark:border-slate-800 space-y-4"
-            >
-              <div>
-                <div className="flex items-start justify-between mb-3">
-                  <Badge
-                    variant={isCompletado ? 'success' : isEnCurso ? 'primary' : 'outline'}
-                  >
-                    {plan.estado}
-                  </Badge>
-
-                  {plan.generadaIA && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#176087] dark:text-[#9ED8ED] bg-[#9ED8ED]/20 px-2 py-0.5 rounded-full">
-                      <Sparkles className="w-3 h-3" /> IA MINEDUC
-                    </span>
-                  )}
-                </div>
-
-                <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">
-                  {plan.titulo}
-                </h3>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 line-clamp-3">
-                  {plan.destreza}
-                </p>
-              </div>
-
-              {/* Progress Ring / Bar */}
-              <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex items-center justify-between text-xs font-semibold">
-                  <span className="text-slate-500">Progreso curricular</span>
-                  <span className="font-mono text-[#176087] dark:text-[#9ED8ED]">{plan.progreso}%</span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      plan.progreso === 100 ? 'bg-emerald-500' : 'bg-[#176087]'
-                    }`}
-                    style={{ width: `${plan.progreso}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-                  <span>{plan.semanas} semanas planificadas</span>
-                  <span>{plan.secuenciaClases.length} clases</span>
-                </div>
-              </div>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedPlanDetail(plan)}
-                className="w-full text-xs text-[#176087] dark:text-[#9ED8ED] justify-between border border-slate-200 dark:border-slate-800 mt-2"
+            return (
+              <Card
+                key={plan.id}
+                className="p-6 flex flex-col justify-between hover:shadow-xl transition-all border-slate-200 dark:border-slate-800 space-y-4"
               >
-                <span>Ver secuencia y destrezas</span>
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </Card>
-          );
-        })}
-      </div>
+                <div>
+                  <div className="flex items-start justify-between mb-3">
+                    <Badge
+                      variant={isCompletado ? 'success' : isEnCurso ? 'primary' : 'outline'}
+                    >
+                      {plan.estado}
+                    </Badge>
 
-      {/* Gráficos y Métricas de Planificación */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-            <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-[#176087]" />
-              Clases Planificadas vs. Ejecutadas (Por Semana)
-            </h4>
-            <span className="text-xs text-slate-400">Octubre 2026</span>
-          </div>
+                    {plan.generadaIA && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#176087] dark:text-[#9ED8ED] bg-[#9ED8ED]/20 px-2 py-0.5 rounded-full">
+                        <Sparkles className="w-3 h-3" /> IA MINEDUC
+                      </span>
+                    )}
+                  </div>
 
-          <div className="space-y-3 pt-2">
-            {[
-              { semana: 'Semana 1', plan: 4, ejec: 4, pct: 100 },
-              { semana: 'Semana 2', plan: 4, ejec: 4, pct: 100 },
-              { semana: 'Semana 3', plan: 4, ejec: 3, pct: 75 },
-              { semana: 'Semana 4', plan: 4, ejec: 1, pct: 25 }
-            ].map((s) => (
-              <div key={s.semana} className="space-y-1 text-xs">
-                <div className="flex justify-between font-semibold">
-                  <span className="text-slate-700 dark:text-slate-300">{s.semana}</span>
-                  <span className="font-mono text-slate-500">
-                    {s.ejec} / {s.plan} clases ({s.pct}%)
-                  </span>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">
+                    {plan.titulo}
+                  </h3>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 line-clamp-3">
+                    {plan.destreza}
+                  </p>
                 </div>
-                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
-                  <div className="bg-[#176087] h-full" style={{ width: `${s.pct}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
 
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-            <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Layers className="w-4 h-4 text-[#176087]" />
-              Distribución Curricular por Ejes de Aprendizaje
-            </h4>
-            <span className="text-xs text-slate-400">Currículo 2023</span>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            {[
-              { eje: 'Lengua y Cultura', horas: '18 horas', pct: 30, color: 'bg-indigo-500' },
-              { eje: 'Comunicación Oral y Debate', horas: '24 horas', pct: 40, color: 'bg-[#176087]' },
-              { eje: 'Lectura Comprensiva', horas: '18 horas', pct: 30, color: 'bg-emerald-500' }
-            ].map((e) => (
-              <div key={e.eje} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#071727] text-xs">
-                <div className="flex items-center gap-2">
-                  <span className={`w-3 h-3 rounded-full ${e.color}`} />
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{e.eje}</span>
+                {/* Progress Ring / Bar */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-500">Progreso curricular</span>
+                    <span className="font-mono text-[#176087] dark:text-[#9ED8ED]">{plan.progreso}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        plan.progreso === 100 ? 'bg-emerald-500' : 'bg-[#176087]'
+                      }`}
+                      style={{ width: `${plan.progreso}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                    <span>{plan.semanas} semanas planificadas</span>
+                    <span>{plan.secuenciaClases?.length || 0} clases</span>
+                  </div>
                 </div>
-                <span className="font-mono text-slate-500">{e.horas} ({e.pct}%)</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedPlanDetail(plan)}
+                  className="w-full text-xs text-[#176087] dark:text-[#9ED8ED] justify-between border border-slate-200 dark:border-slate-800 mt-2"
+                >
+                  <span>Ver secuencia y destrezas</span>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       {/* DRAWER DE GENERACIÓN CON IA */}
       <Drawer

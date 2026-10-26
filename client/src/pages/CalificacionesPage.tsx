@@ -4,14 +4,12 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { API_URL } from '../config/api';
-import {
-  PARALELOS_INICIALES,
-  ACTIVIDADES_INICIALES,
+import type {
   Estudiante,
   ActividadInfo
 } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge, InfoTooltip } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import { StudentProfileModal } from '../components/student/StudentProfileModal';
 import {
@@ -33,18 +31,14 @@ import {
 export const CalificacionesPage: React.FC = () => {
   const { cursoId } = useParams<{ cursoId: string }>();
   const { token } = useAuth();
-  const [selectedCursoId, setSelectedCursoId] = useState<string>(
-    cursoId || PARALELOS_INICIALES[0].id
-  );
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [paralelosList, setParalelosList] = useState<any[]>(PARALELOS_INICIALES);
-  const fallbackParalelo = PARALELOS_INICIALES.find((p) => p.id === selectedCursoId) || PARALELOS_INICIALES[0];
-  const [paralelo, setParalelo] = useState<any>(fallbackParalelo);
-  const [estudiantes, setEstudiantes] = useState<Estudiante[]>(fallbackParalelo.estudiantes);
-
-  const [actividades, setActividades] = useState<ActividadInfo[]>(
-    ACTIVIDADES_INICIALES.filter((a) => a.paraleloId === fallbackParalelo.id)
-  );
+  const [selectedCursoId, setSelectedCursoId] = useState<string>(cursoId || '');
+  const [paralelosList, setParalelosList] = useState<any[]>([]);
+  const [paralelo, setParalelo] = useState<any>({ id: '', nombre: '', materia: '' });
+  const [estudiantes, setEstudiantes] = useState<Estudiante[]>([]);
+  const [actividades, setActividades] = useState<ActividadInfo[]>([]);
 
   // Matriz de notas inline: [estudianteId][actividadId] = nota (o undefined si está vacía)
   const [notas, setNotas] = useState<Record<string, Record<string, number | undefined>>>({});
@@ -56,92 +50,75 @@ export const CalificacionesPage: React.FC = () => {
   const [nuevaTipo, setNuevaTipo] = useState<'Individual' | 'Grupal' | 'Evaluacion'>('Individual');
   const [nuevaPonderacion, setNuevaPonderacion] = useState(10);
 
-  // Análisis IA automático (P3.5)
+  // Análisis IA
   const [analisisIA, setAnalisisIA] = useState<any | null>(null);
-  const [cargandoIA, setCargandoIA] = useState(true);
+  const [cargandoIA, setCargandoIA] = useState(false);
 
-  // Informe oficial (P2.2)
+  // Informe oficial
   const [showInformeModal, setShowInformeModal] = useState(false);
   const [informeContenido, setInformeContenido] = useState<any | null>(null);
   const [generandoInforme, setGenerandoInforme] = useState(false);
 
-  // Cargar lista de paralelos del usuario desde MongoDB
+  // 1. Cargar lista de paralelos del usuario desde MongoDB
   useEffect(() => {
     fetch(`${API_URL}/api/paralelos`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      headers: { Authorization: `Bearer ${token}` }
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.paralelos && data.paralelos.length > 0) {
-          setParalelosList(data.paralelos);
-          if (!cursoId) {
-            setSelectedCursoId(data.paralelos[0].id);
+      .then((d) => {
+        if (d?.paralelos && Array.isArray(d.paralelos) && d.paralelos.length > 0) {
+          setParalelosList(d.paralelos);
+          if (!selectedCursoId) {
+            setSelectedCursoId(d.paralelos[0].id);
           }
         }
       })
-      .catch((e) => console.warn('Usando lista local de paralelos:', e));
-  }, [token, cursoId]);
+      .catch((e) => console.warn('Error cargando paralelos:', e));
+  }, [token]);
 
-  // Cargar calificaciones y estudiantes reales de MongoDB para el paralelo seleccionado
+  // 2. Patrón de fetch para calificaciones del paralelo seleccionado
   useEffect(() => {
-    if (!selectedCursoId) return;
-    let isMounted = true;
-
-    fetch(`${API_URL}/api/calificaciones/${selectedCursoId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    const endpointCursoId = selectedCursoId || cursoId || 'default';
+    fetch(`${API_URL}/api/calificaciones/${endpointCursoId}`, {
+      headers: { Authorization: `Bearer ${token}` }
     })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!isMounted || !data?.success) return;
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
+        if (d?.success) {
+          if (d.paralelo) setParalelo(d.paralelo);
+          setActividades(Array.isArray(d.actividades) ? d.actividades : []);
+          if (Array.isArray(d.libroNotas)) {
+            const loadedEsts: Estudiante[] = d.libroNotas.map((n: any, idx: number) => ({
+              id: n.estudianteId,
+              nombre: n.nombre,
+              cedula: n.cedula || '',
+              numeroLista: n.numeroLista || idx + 1,
+              activo: true,
+              telefonoRepresentante: '',
+              asistenciaMes: 100,
+              faltasJustificadas: 0,
+              faltasInjustificadas: 0,
+              atrasos: 0,
+              promedioGeneral: n.promedio || 0,
+              observaciones: []
+            }));
+            setEstudiantes(loadedEsts);
 
-        if (data.paralelo) {
-          setParalelo((prev: any) => ({
-            ...prev,
-            ...data.paralelo,
-            id: data.paralelo.id || selectedCursoId
-          }));
-        }
-
-        if (Array.isArray(data.actividades) && data.actividades.length > 0) {
-          setActividades(data.actividades);
-        }
-
-        if (Array.isArray(data.libroNotas) && data.libroNotas.length > 0) {
-          const loadedEsts: Estudiante[] = data.libroNotas.map((n: any, idx: number) => ({
-            id: n.estudianteId,
-            nombre: n.nombre,
-            cedula: n.cedula || '0900000000',
-            numeroLista: n.numeroLista || idx + 1,
-            activo: true,
-            telefonoRepresentante: '+593 99 123 4567',
-            asistenciaMes: 95,
-            faltasJustificadas: 0,
-            faltasInjustificadas: 0,
-            atrasos: 0,
-            promedioGeneral: n.promedio || 8.0,
-            observaciones: []
-          }));
-          setEstudiantes(loadedEsts);
-
-          const matrix: Record<string, Record<string, number | undefined>> = {};
-          data.libroNotas.forEach((n: any) => {
-            matrix[n.estudianteId] = n.notas || {};
-          });
-          setNotas(matrix);
+            const matrix: Record<string, Record<string, number | undefined>> = {};
+            d.libroNotas.forEach((n: any) => {
+              matrix[n.estudianteId] = n.notas || {};
+            });
+            setNotas(matrix);
+          }
         }
       })
-      .catch((err) => {
-        console.warn('Usando inicialización local de notas:', err);
-      });
+      .finally(() => setLoading(false));
+  }, [selectedCursoId]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedCursoId, token]);
-
-  // Cargar análisis del grupo automáticamente (P3.5)
+  // Cargar análisis del grupo si hay actividades y paralelo
   useEffect(() => {
-    let isMounted = true;
+    if (!paralelo.id) return;
     setCargandoIA(true);
 
     fetch(`${API_URL}/api/ai/analisis-rendimiento`, {
@@ -150,47 +127,21 @@ export const CalificacionesPage: React.FC = () => {
       body: JSON.stringify({ paraleloId: paralelo.id })
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (isMounted) {
-          if (data?.analisis) {
-            setAnalisisIA(data.analisis);
-          } else {
-            setAnalisisIA({
-              diagnosticoBreve: `El 86% del paralelo ${paralelo.nombre} mantiene un rendimiento óptimo (promedio > 7.00).`,
-              puntosAlerta: [
-                '4 estudiantes presentan promedio menor a 7.00 y requieren Plan de Refuerzo Académico (PRAI).',
-                'La actividad "Taller 1: Estructura del ensayo" registró la mayor dispersión de notas.'
-              ],
-              estrategiasRefuerzo: [
-                'Tutoría focalizada en conectores de causa y consecuencia antes del examen parcial.',
-                'Retroalimentación entre pares en la redacción de párrafos argumentativos.'
-              ]
-            });
-          }
-          setCargandoIA(false);
+      .then((d) => {
+        if (d?.analisis) {
+          setAnalisisIA(d.analisis);
+        } else {
+          setAnalisisIA(null);
         }
       })
       .catch(() => {
-        if (isMounted) {
-          setAnalisisIA({
-            diagnosticoBreve: `El 86% del paralelo ${paralelo.nombre} mantiene un rendimiento óptimo (promedio > 7.00).`,
-            puntosAlerta: [
-              '4 estudiantes presentan promedio menor a 7.00 y requieren Plan de Refuerzo Académico.',
-              'Reforzar destreza LL.4.2.1 en comprensión de textos argumentativos.'
-            ],
-            estrategiasRefuerzo: [
-              'Tutoría formativa en la primera media hora del bloque matutino.',
-              'Reevaluación diagnóstica previa al cierre quimestral.'
-            ]
-          });
-          setCargandoIA(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
+        setAnalisisIA(null);
+      })
+      .finally(() => setCargandoIA(false));
   }, [paralelo.id]);
+
+  if (loading) return <Skeleton className="h-[600px] w-full" />;
+  if (!data) return <EmptyState mensaje="No hay datos aún" />;
 
   const handleNotaChange = (estId: string, actId: string, val: string) => {
     if (val === '' || val === '-') {
@@ -421,6 +372,9 @@ export const CalificacionesPage: React.FC = () => {
   const aprobados = todosPromedios.filter((p) => p >= 7.0).length;
   const porcentajeAprobados = ((aprobados / (todosPromedios.length || 1)) * 100).toFixed(1);
 
+  if (loading) return <Skeleton className="h-96 w-full" />;
+  if (!data) return <EmptyState mensaje="No hay datos aún" />;
+
   return (
     <div className="space-y-6 text-left">
       {/* 1. Header con InfoTooltip (P3.1) */}
@@ -550,7 +504,7 @@ export const CalificacionesPage: React.FC = () => {
               <div className="h-16 bg-slate-100 dark:bg-slate-800/60 rounded-xl" />
             </div>
           </div>
-        ) : (
+        ) : analisisIA ? (
           <div className="mt-4 space-y-3">
             <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
               {analisisIA?.diagnosticoBreve}
@@ -580,110 +534,125 @@ export const CalificacionesPage: React.FC = () => {
               </div>
             </div>
           </div>
+        ) : (
+          <div className="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-center">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              El diagnóstico pedagógico con IA se activará automáticamente al registrar calificaciones en las actividades.
+            </p>
+          </div>
         )}
       </Card>
 
-      {/* 4. TABLA DE CALIFICACIONES (P3.4: Cabecera Baltic Blue #176087, sin scrollbar visible) */}
-      <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="overflow-x-auto scrollbar-none">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-[#176087] text-white">
-              <tr>
-                <th className="py-3 px-3 w-12 text-center font-mono font-bold border-r border-[#134d6d]">
-                  #
-                </th>
-                <th className="py-3 px-4 font-bold border-r border-[#134d6d] min-w-[200px]">
-                  Estudiante
-                </th>
-                {actividades.map((act) => (
-                  <th
-                    key={act.id}
-                    className="py-3 px-3 text-center font-semibold border-r border-[#134d6d] min-w-[130px]"
-                  >
-                    <div className="truncate max-w-[120px] mx-auto" title={act.titulo}>
-                      {act.titulo}
-                    </div>
-                    <span className="text-[10px] text-[#9ED8ED] font-normal block font-mono">
-                      (10 pts)
-                    </span>
+      {/* 4. TABLA DE CALIFICACIONES O EMPTY STATE */}
+      {actividades.length === 0 ? (
+        <EmptyState
+          mensaje="Aún no has agregado actividades"
+          submensaje="Crea tu primera tarea, lección o evaluación para comenzar a registrar notas en este paralelo."
+          accionTexto="Nueva actividad"
+          onAccion={() => setShowAddActividad(true)}
+        />
+      ) : (
+        <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="overflow-x-auto scrollbar-none">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-[#176087] text-white">
+                <tr>
+                  <th className="py-3 px-3 w-12 text-center font-mono font-bold border-r border-[#134d6d]">
+                    #
                   </th>
-                ))}
-                <th className="py-3 px-4 text-center font-bold bg-[#0A2239] text-[#9ED8ED] min-w-[100px]">
-                  Promedio
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {estudiantes.map((est) => {
-                const prom = calcularPromedio(est.id);
-                const enRiesgo = prom < 7.0 && prom > 0;
+                  <th className="py-3 px-4 font-bold border-r border-[#134d6d] min-w-[200px]">
+                    Estudiante
+                  </th>
+                  {actividades.map((act) => (
+                    <th
+                      key={act.id}
+                      className="py-3 px-3 text-center font-semibold border-r border-[#134d6d] min-w-[130px]"
+                    >
+                      <div className="truncate max-w-[120px] mx-auto" title={act.titulo}>
+                        {act.titulo}
+                      </div>
+                      <span className="text-[10px] text-[#9ED8ED] font-normal block font-mono">
+                        (10 pts)
+                      </span>
+                    </th>
+                  ))}
+                  <th className="py-3 px-4 text-center font-bold bg-[#0A2239] text-[#9ED8ED] min-w-[100px]">
+                    Promedio
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {estudiantes.map((est) => {
+                  const prom = calcularPromedio(est.id);
+                  const enRiesgo = prom < 7.0 && prom > 0;
 
-                return (
-                  <tr
-                    key={est.id}
-                    className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
-                      enRiesgo ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''
-                    }`}
-                  >
-                    <td className="py-2.5 px-3 text-center font-mono text-slate-400 font-bold border-r border-slate-100 dark:border-slate-800">
-                      {est.numeroLista}
-                    </td>
-                    <td className="py-2.5 px-4 border-r border-slate-100 dark:border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedStudent(est)}
-                        className="font-bold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] text-left cursor-pointer"
-                      >
-                        {est.nombre}
-                      </button>
-                      <span className="text-[10px] text-slate-400 font-mono block">
-                        CI: {est.cedula}
-                      </span>
-                    </td>
-                    {actividades.map((act) => {
-                      const val = notas[est.id]?.[act.id];
-                      return (
-                        <td
-                          key={act.id}
-                          className="py-2 px-2 text-center border-r border-slate-100 dark:border-slate-800"
+                  return (
+                    <tr
+                      key={est.id}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                        enRiesgo ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''
+                      }`}
+                    >
+                      <td className="py-2.5 px-3 text-center font-mono text-slate-400 font-bold border-r border-slate-100 dark:border-slate-800">
+                        {est.numeroLista}
+                      </td>
+                      <td className="py-2.5 px-4 border-r border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedStudent(est)}
+                          className="font-bold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] text-left cursor-pointer"
                         >
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="10"
-                            placeholder="-"
-                            value={val !== undefined ? val : ''}
-                            onChange={(e) => handleNotaChange(est.id, act.id, e.target.value)}
-                            className={`w-16 h-8 text-center text-xs font-mono font-bold rounded-md border focus:outline-none transition-colors ${
-                              val !== undefined && val < 7.0
-                                ? 'border-rose-400 bg-rose-50/60 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 focus:border-rose-600'
-                                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:border-[#176087]'
-                            }`}
-                          />
-                        </td>
-                      );
-                    })}
-                    <td className="py-2.5 px-4 text-center font-mono font-bold">
-                      <span
-                        className={`px-2 py-1 rounded text-xs ${
-                          prom >= 7.0
-                            ? 'text-emerald-700 dark:text-emerald-400 font-black'
-                            : prom > 0
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-black'
-                            : 'text-slate-400'
-                        }`}
-                      >
-                        {prom > 0 ? prom.toFixed(2) : '-'}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                          {est.nombre}
+                        </button>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          CI: {est.cedula}
+                        </span>
+                      </td>
+                      {actividades.map((act) => {
+                        const val = notas[est.id]?.[act.id];
+                        return (
+                          <td
+                            key={act.id}
+                            className="py-2 px-2 text-center border-r border-slate-100 dark:border-slate-800"
+                          >
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="10"
+                              placeholder="-"
+                              value={val !== undefined ? val : ''}
+                              onChange={(e) => handleNotaChange(est.id, act.id, e.target.value)}
+                              className={`w-16 h-8 text-center text-xs font-mono font-bold rounded-md border focus:outline-none transition-colors ${
+                                val !== undefined && val < 7.0
+                                  ? 'border-rose-400 bg-rose-50/60 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 focus:border-rose-600'
+                                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white focus:border-[#176087]'
+                              }`}
+                            />
+                          </td>
+                        );
+                      })}
+                      <td className="py-2.5 px-4 text-center font-mono font-bold">
+                        <span
+                          className={`px-2 py-1 rounded text-xs ${
+                            prom >= 7.0
+                              ? 'text-emerald-700 dark:text-emerald-400 font-black'
+                              : prom > 0
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-black'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          {prom > 0 ? prom.toFixed(2) : '-'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* Modal Nueva Actividad (P3.4: inicializa en blanco con placeholder '-') */}
       {showAddActividad && (

@@ -49,8 +49,8 @@ export const PerfilPage: React.FC = () => {
       id: 'g-cal',
       nombre: 'Google Calendar',
       servicio: 'Google Workspace',
-      conectado: true,
-      apiKey: 'AIzaSyDocenteEcuadorCal2026',
+      conectado: false,
+      apiKey: '',
       descripcion: 'Sincroniza tus bloques de clase y juntas de curso en tu calendario personal.',
       icono: 'GC'
     },
@@ -58,8 +58,8 @@ export const PerfilPage: React.FC = () => {
       id: 'gmail-outlook',
       nombre: 'Gmail / Outlook Institucional',
       servicio: 'Correo Institucional',
-      conectado: true,
-      apiKey: 'andres.morales@uefdemocracia.edu.ec',
+      conectado: false,
+      apiKey: '',
       descripcion: 'Envío de comunicados y citaciones automáticas a padres de familia.',
       icono: 'GM'
     },
@@ -67,8 +67,8 @@ export const PerfilPage: React.FC = () => {
       id: 'zoom',
       nombre: 'Zoom Clases Virtuales',
       servicio: 'Videoconferencia',
-      conectado: true,
-      apiKey: 'https://zoom.us/j/9812938472?pwd=asap',
+      conectado: false,
+      apiKey: '',
       descripcion: 'Acceso directo a la sala virtual para refuerzo pedagógico en línea.',
       icono: 'ZM'
     },
@@ -78,7 +78,7 @@ export const PerfilPage: React.FC = () => {
       servicio: 'Microsoft 365 Educación',
       conectado: false,
       apiKey: '',
-      descripcion: 'Conexión con el aula virtual del Ministerio de Educación.',
+      descripcion: 'Canal colaborativo institucional para comisiones docentes.',
       icono: 'MS'
     }
   ]);

@@ -63,32 +63,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const notifications = [
-    {
-      id: 'notif-1',
-      titulo: 'Actividades por calificar',
-      detalle: '5 tareas pendientes en 8vo A de Lengua y Literatura.',
-      href: '/calificaciones',
-      tiempo: 'Hace 20 min',
-      urgente: true
-    },
-    {
-      id: 'notif-2',
-      titulo: 'Asistencia matutina pendiente',
-      detalle: 'No has registrado la asistencia diaria de 9no B.',
-      href: '/asistencia',
-      tiempo: 'Hace 45 min',
-      urgente: true
-    },
-    {
-      id: 'notif-3',
-      titulo: 'Planificación validada con IA',
-      detalle: 'Microplanificación PUD del Bloque 2 lista para descarga.',
-      href: '/planificacion',
-      tiempo: 'Ayer',
-      urgente: false
-    }
-  ];
+  interface NotificationItem {
+    id: string;
+    titulo: string;
+    detalle: string;
+    href: string;
+    tiempo: string;
+    urgente?: boolean;
+  }
+  const notifications: NotificationItem[] = [];
 
   const handleNotificationClick = (href: string) => {
     setNotificationsOpen(false);
@@ -204,37 +187,45 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
               title="Notificaciones"
             >
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-[#0A2239]" />
+              {notifications.length > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-[#0A2239]" />
+              )}
             </button>
 
             {notificationsOpen && (
               <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-[#0A2239] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-4 z-50 text-left">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
                   <span className="text-xs font-bold text-slate-900 dark:text-white">Centro de Notificaciones</span>
-                  <span className="text-[10px] text-[#176087] dark:text-[#9ED8ED] font-semibold cursor-pointer hover:underline">
-                    3 nuevas
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    {notifications.length} nuevas
                   </span>
                 </div>
 
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 my-2 max-h-72 overflow-y-auto">
-                  {notifications.map((n) => (
-                    <div
-                      key={n.id}
-                      onClick={() => handleNotificationClick(n.href)}
-                      className="py-2.5 px-2 -mx-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors space-y-0.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                          {n.urgente && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />}
-                          {n.titulo}
-                        </span>
-                        <span className="text-[10px] text-slate-400">{n.tiempo}</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                        {n.detalle}
-                      </p>
+                  {notifications.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-400">
+                      No tienes notificaciones pendientes
                     </div>
-                  ))}
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        onClick={() => handleNotificationClick(n.href)}
+                        className="py-2.5 px-2 -mx-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors space-y-0.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            {n.urgente && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />}
+                            {n.titulo}
+                          </span>
+                          <span className="text-[10px] text-slate-400">{n.tiempo}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                          {n.detalle}
+                        </p>
+                      </div>
+                    ))
+                  )}
                 </div>
 
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center">

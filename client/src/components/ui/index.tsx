@@ -172,3 +172,34 @@ export const InfoTooltip: React.FC<{ content: string; className?: string }> = ({
   );
 };
 
+// ------------------------------------
+// SKELETON
+// ------------------------------------
+export const Skeleton: React.FC<{ className?: string }> = ({ className }) => (
+  <div className={cn('animate-pulse bg-slate-200/80 dark:bg-slate-800/80 rounded-xl', className || 'h-32 w-full')} />
+);
+
+// ------------------------------------
+// EMPTY STATE
+// ------------------------------------
+export const EmptyState: React.FC<{
+  mensaje: string;
+  submensaje?: string;
+  accionTexto?: string;
+  onAccion?: () => void;
+  icon?: React.ReactNode;
+  className?: string;
+}> = ({ mensaje, submensaje, accionTexto, onAccion, icon, className }) => (
+  <div className={cn('flex flex-col items-center justify-center p-8 sm:p-12 text-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-[#071727]/40', className)}>
+    {icon && <div className="mb-3 text-slate-400 dark:text-slate-500">{icon}</div>}
+    <h3 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-200">{mensaje}</h3>
+    {submensaje && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">{submensaje}</p>}
+    {accionTexto && onAccion && (
+      <Button variant="primary" size="sm" onClick={onAccion} className="mt-4">
+        {accionTexto}
+      </Button>
+    )}
+  </div>
+);
+
+

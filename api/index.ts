@@ -1131,27 +1131,24 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
       }
 
       if (misParalelos.length === 0) {
-        totalEstudiantes = 60;
-        paralelosNombres = ['8vo EGB "A"', '9no EGB "B"'];
-        actividadesPendientes = await Actividad.countDocuments({ estado: 'Por calificar' }).catch(() => 5);
-        claseActual = {
-          paralelo: '8vo EGB "A"',
-          materia: 'Lengua y Literatura',
-          aula: 'Bloque B · Aula 204',
-          horario: '07:15 a 08:45',
-          tema: 'Ensayo argumentativo'
-        };
+        totalEstudiantes = 0;
+        paralelosNombres = [];
+        actividadesPendientes = 0;
+        claseActual = null;
+        asistenciaMes = 0;
       }
 
       docenteObj.totalAlumnos = totalEstudiantes;
       docenteObj.asistenciaPromedioGeneral = asistenciaMes;
 
-      const smartTodo = await sugerirTareasTodo({
-        actividadesSinCalificar: actividadesPendientes,
-        planificacionesPorIniciar: 1,
-        asistenciaPendienteHoy: true,
-        paralelosNombres: paralelosNombres.length > 0 ? paralelosNombres : ['8vo EGB "A"']
-      });
+      const smartTodo = misParalelos.length > 0
+        ? await sugerirTareasTodo({
+            actividadesSinCalificar: actividadesPendientes,
+            planificacionesPorIniciar: 1,
+            asistenciaPendienteHoy: true,
+            paralelosNombres: paralelosNombres.length > 0 ? paralelosNombres : []
+          })
+        : [];
 
       return res.json({
         success: true,
@@ -1164,38 +1161,32 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
         estadisticas: {
           totalEstudiantes,
           actividadesPorCalificar: actividadesPendientes,
-          clasesPlanificadasSemana: Math.max(misParalelos.length * 4, 14),
+          clasesPlanificadasSemana: misParalelos.length * 4,
           asistenciaPromedioMes: asistenciaMes,
-          informesGenerados: 3
+          informesGenerados: 0
         },
         porHacerInteligente: smartTodo,
-        ultimasActividades: [{ id: '1', accion: 'Asistencia registrada', detalle: paralelosNombres[0] || '8vo EGB "A"', tiempo: 'Hace 45 min' }]
+        ultimasActividades: misParalelos.length > 0
+          ? [{ id: '1', accion: 'Asistencia registrada', detalle: paralelosNombres[0] || 'Paralelo', tiempo: 'Hace 45 min' }]
+          : []
       });
     } catch (e) {
       console.warn('Error calculando dashboard desde MongoDB:', e);
     }
   }
 
-  // Fallback memoria
-  actividadesPendientes = actividadesState.filter((a: any) => a.estado === 'Por calificar').length;
-  const smartTodo = await sugerirTareasTodo({
-    actividadesSinCalificar: actividadesPendientes,
-    planificacionesPorIniciar: 1,
-    asistenciaPendienteHoy: true,
-    paralelosNombres: ['8vo EGB "A"', '9no EGB "B"']
-  });
-
+  // Fallback memoria para usuario nuevo sin datos
   res.json({
     success: true,
     docente: DOCENTE_ACTUAL,
     resumenHoy: {
       fecha: new Date().toLocaleDateString('es-EC', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
       jornada: 'Matutina (07:15 - 12:45)',
-      claseActual: { paralelo: '8vo EGB "A"', materia: 'Lengua y Literatura', aula: 'Bloque B · Aula 204', horario: '07:15 a 08:45', tema: 'Ensayo argumentativo' }
+      claseActual: null
     },
-    estadisticas: { totalEstudiantes: 60, actividadesPorCalificar: actividadesPendientes, clasesPlanificadasSemana: 14, asistenciaPromedioMes: 94.8, informesGenerados: 3 },
-    porHacerInteligente: smartTodo,
-    ultimasActividades: [{ id: '1', accion: 'Asistencia registrada', detalle: '8vo EGB "A"', tiempo: 'Hace 45 min' }]
+    estadisticas: { totalEstudiantes: 0, actividadesPorCalificar: 0, clasesPlanificadasSemana: 0, asistenciaPromedioMes: 0, informesGenerados: 0 },
+    porHacerInteligente: [],
+    ultimasActividades: []
   });
 });
 
@@ -1420,10 +1411,10 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
         const alumnos = await Alumno.find({
           $or: [{ paraleloId: mongoParalelo._id }, { paraleloId: paraleloIdStr }]
         }).sort({ numeroLista: 1, nombre: 1 });
-        const actividadesMongo = await Actividad.find({ paraleloId: { $in: [paraleloIdStr, cursoId, 'par-8vo-a'] } });
-        const calificacionesMongo = await Calificacion.find({ paraleloId: { $in: [paraleloIdStr, cursoId, 'par-8vo-a'] } });
+        const actividadesMongo = await Actividad.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
+        const calificacionesMongo = await Calificacion.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
 
-        const actividades = actividadesMongo.length > 0 ? actividadesMongo.map((a: any) => ({
+        const actividades = actividadesMongo.map((a: any) => ({
           id: a._id.toString(),
           paraleloId: a.paraleloId,
           titulo: a.titulo,
@@ -1435,7 +1426,7 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
           estado: a.estado,
           bloque: a.bloque,
           descripcion: a.descripcion
-        })) : actividadesState.filter((a: any) => a.paraleloId === 'par-8vo-a');
+        }));
 
         const libroNotas = alumnos.map((est: any) => {
           const estId = est._id.toString();
@@ -1444,9 +1435,6 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
             const found = calificacionesMongo.find((c: any) => c.estudianteId === estId && c.actividadId === act.id);
             if (found) {
               notasAlumno[act.id] = found.nota;
-            } else {
-              const seed = (est.numeroLista * 7) % 10;
-              notasAlumno[act.id] = Number((7.0 + (seed / 10) * 2.8).toFixed(2));
             }
           });
           const vals = Object.values(notasAlumno) as number[];
@@ -1533,8 +1521,14 @@ app.post('/api/calificaciones/actividad', async (req: Request, res: Response) =>
   await connectDB();
   if (isMongoConnected()) {
     try {
+      const isObjectId = mongoose.isValidObjectId(paraleloId);
+      const paraleloDoc = await Paralelo.findOne(
+        isObjectId ? { $or: [{ _id: paraleloId }, { id: paraleloId }] } : { $or: [{ id: paraleloId }, { nombre: paraleloId }] }
+      ).catch(() => null);
+      const realParaleloId = paraleloDoc ? paraleloDoc._id.toString() : paraleloId;
+
       const nuevaAct = await Actividad.create({
-        paraleloId: paraleloId || 'par-8vo-a',
+        paraleloId: realParaleloId,
         titulo: titulo || 'Nueva Actividad',
         tipo: tipo || 'Individual',
         fechaEntrega: fechaEntrega || new Date().toISOString().slice(0, 10),
@@ -1591,29 +1585,27 @@ app.get('/api/workspace/kanban', async (req: Request, res: Response) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id || 'docente-1';
       const tasks = await KanbanTask.find({ docenteId }).sort({ createdAt: -1 });
-      if (tasks && tasks.length > 0) {
-        return res.json({
-          success: true,
-          kanbanTasks: tasks.map((t: any) => ({
-            id: t._id.toString(),
-            titulo: t.titulo,
-            descripcion: t.descripcion,
-            paralelo: t.paralelo,
-            columna: t.columna,
-            prioridad: t.prioridad,
-            urgencia: t.urgencia,
-            fecha: t.fecha,
-            fechaLimite: t.fechaLimite,
-            observaciones: t.observaciones,
-            adjuntos: t.adjuntos || []
-          }))
-        });
-      }
+      return res.json({
+        success: true,
+        kanbanTasks: tasks.map((t: any) => ({
+          id: t._id.toString(),
+          titulo: t.titulo,
+          descripcion: t.descripcion,
+          paralelo: t.paralelo,
+          columna: t.columna,
+          prioridad: t.prioridad,
+          urgencia: t.urgencia,
+          fecha: t.fecha,
+          fechaLimite: t.fechaLimite,
+          observaciones: t.observaciones,
+          adjuntos: t.adjuntos || []
+        }))
+      });
     } catch (err) {
       console.warn('Error leyendo Kanban de MongoDB:', err);
     }
   }
-  res.json({ success: true, kanbanTasks });
+  res.json({ success: true, kanbanTasks: [] });
 });
 
 app.post('/api/workspace/kanban', async (req: Request, res: Response) => {
@@ -1773,33 +1765,31 @@ app.get('/api/planificacion', async (req: Request, res: Response) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id || 'docente-1';
       const plans = await Planificacion.find({ docenteId }).sort({ createdAt: -1 });
-      if (plans && plans.length > 0) {
-        return res.json({
-          success: true,
-          planificaciones: plans.map((p: any) => ({
-            id: p._id.toString(),
-            docenteId: p.docenteId,
-            paraleloId: p.paraleloId,
-            materia: p.materia,
-            bloque: p.bloque,
-            titulo: p.titulo,
-            destreza: p.destreza,
-            semanas: p.semanas,
-            progreso: p.progreso,
-            estado: p.estado,
-            generadaIA: p.generadaIA,
-            objetivos: p.objetivos || [],
-            recursos: p.recursos || [],
-            criteriosEvaluacion: p.criteriosEvaluacion || [],
-            secuenciaClases: p.secuenciaClases || []
-          }))
-        });
-      }
+      return res.json({
+        success: true,
+        planificaciones: plans.map((p: any) => ({
+          id: p._id.toString(),
+          docenteId: p.docenteId,
+          paraleloId: p.paraleloId,
+          materia: p.materia,
+          bloque: p.bloque,
+          titulo: p.titulo,
+          destreza: p.destreza,
+          semanas: p.semanas,
+          progreso: p.progreso,
+          estado: p.estado,
+          generadaIA: p.generadaIA,
+          objetivos: p.objetivos || [],
+          recursos: p.recursos || [],
+          criteriosEvaluacion: p.criteriosEvaluacion || [],
+          secuenciaClases: p.secuenciaClases || []
+        }))
+      });
     } catch (e) {
       console.warn('Error leyendo planificaciones de MongoDB:', e);
     }
   }
-  res.json({ success: true, planificaciones: planificacionesState });
+  res.json({ success: true, planificaciones: [] });
 });
 
 app.post('/api/planificacion/generar-ia', async (req: Request, res: Response) => {
@@ -1900,7 +1890,7 @@ app.get('/api/workspace', async (req: Request, res: Response) => {
           bloque: a.bloque,
           descripcion: a.descripcion
         })) : actividadesState,
-        documentos: docs.length > 0 ? docs.map((d: any) => ({
+        documentos: docs.map((d: any) => ({
           id: d._id.toString(),
           nombre: d.nombre,
           categoria: d.categoria,
@@ -1909,11 +1899,11 @@ app.get('/api/workspace', async (req: Request, res: Response) => {
           tipo: d.tipo,
           fechaSubida: d.fechaSubida,
           url: d.url
-        })) : documentosState
+        }))
       });
     } catch (e) {}
   }
-  res.json({ success: true, kanbanTasks, plantillas: PLANTILLAS_MINEDUC, actividades: actividadesState, documentos: documentosState });
+  res.json({ success: true, kanbanTasks: [], plantillas: PLANTILLAS_MINEDUC, actividades: [], documentos: [] });
 });
 
 app.get('/api/workspace/documentos', async (req: Request, res: Response) => {
@@ -1923,10 +1913,10 @@ app.get('/api/workspace/documentos', async (req: Request, res: Response) => {
       const userPayload = getUserFromToken(req);
       const docenteId = userPayload?.id || 'docente-1';
       const docs = await Documento.find({ docenteId }).sort({ createdAt: -1 });
-      if (docs && docs.length > 0) return res.json({ success: true, documentos: docs });
+      return res.json({ success: true, documentos: docs });
     } catch (e) {}
   }
-  res.json({ success: true, documentos: documentosState });
+  res.json({ success: true, documentos: [] });
 });
 
 app.post('/api/workspace/documentos', async (req: Request, res: Response) => {

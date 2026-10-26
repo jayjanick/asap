@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge, InfoTooltip } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import {
   Calendar,
@@ -26,53 +26,34 @@ export const DashboardPage: React.FC = () => {
   const { user, token, institucionActiva } = useAuth();
   const [searchParams] = useSearchParams();
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingStep, setOnboardingStep] = useState(1);
-  const [dashboardData, setDashboardData] = useState<any>(null);
-  const [paralelosList, setParalelosList] = useState<any[]>([]);
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [todoList, setTodoList] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchDashboard = async () => {
-      try {
-        const [dashRes, parRes] = await Promise.all([
-          fetch(`${API_URL}/api/dashboard`, {
-            headers: token ? { Authorization: `Bearer ${token}` } : {}
-          }),
-          fetch(`${API_URL}/api/paralelos`, {
-            headers: token ? { Authorization: `Bearer ${token}` } : {}
-          })
-        ]);
-        if (dashRes.ok) {
-          const dData = await dashRes.json();
-          if (dData.success) {
-            setDashboardData(dData);
-            if (Array.isArray(dData.porHacerInteligente) && dData.porHacerInteligente.length > 0) {
-              setTodoList(
-                dData.porHacerInteligente.map((t: any, i: number) => ({
-                  id: `t-smart-${i}`,
-                  titulo: t.titulo || t.texto || t,
-                  urgencia: t.urgencia || 'Media',
-                  fechaLimite: t.fechaLimite || new Date().toISOString().slice(0, 10),
-                  observaciones: t.observaciones || t.motivo || 'Generado por análisis del paralelo.',
-                  modulo: t.modulo || 'Asistencia',
-                  link: t.link || '/asistencia',
-                  completada: false
-                }))
-              );
-            }
-          }
+    fetch(`${API_URL}/api/dashboard`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
+        if (Array.isArray(d?.porHacerInteligente) && d.porHacerInteligente.length > 0) {
+          setTodoList(
+            d.porHacerInteligente.map((t: any, i: number) => ({
+              id: `t-smart-${i}`,
+              titulo: t.titulo || t.texto || t,
+              urgencia: t.urgencia || 'Media',
+              fechaLimite: t.fechaLimite || new Date().toISOString().slice(0, 10),
+              observaciones: t.observaciones || t.motivo || 'Generado por análisis del paralelo.',
+              modulo: t.modulo || 'Asistencia',
+              link: t.link || '/asistencia',
+              completada: false
+            }))
+          );
         }
-        if (parRes.ok) {
-          const pData = await parRes.json();
-          if (pData.success && Array.isArray(pData.paralelos)) {
-            setParalelosList(pData.paralelos);
-          }
-        }
-      } catch (err) {
-        console.warn('Error fetching dashboard from API:', err);
-      }
-    };
-    fetchDashboard();
-  }, [token]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   // Formulario de tarea con urgencia, fecha límite y observaciones (P3.2)
   const [nuevaTareaTitulo, setNuevaTareaTitulo] = useState('');
@@ -80,49 +61,6 @@ export const DashboardPage: React.FC = () => {
   const [nuevaTareaFecha, setNuevaTareaFecha] = useState('');
   const [nuevaTareaObs, setNuevaTareaObs] = useState('');
   const [showTaskForm, setShowTaskForm] = useState(false);
-
-  const [todoList, setTodoList] = useState([
-    {
-      id: 't-1',
-      titulo: 'Tomar asistencia de 9no EGB "B" (Jornada matutina)',
-      urgencia: 'Alta',
-      fechaLimite: '2026-10-24',
-      observaciones: 'Reportar ausencias reiteradas a Inspección General.',
-      modulo: 'Asistencia',
-      link: '/asistencia/par-9no-b',
-      completada: false
-    },
-    {
-      id: 't-2',
-      titulo: 'Calificar 5 micro-crónicas barriales en 8vo A',
-      urgencia: 'Alta',
-      fechaLimite: '2026-10-25',
-      observaciones: 'Verificar rúbrica de conectores lógicos y ortografía.',
-      modulo: 'Calificaciones',
-      link: '/calificaciones',
-      completada: false
-    },
-    {
-      id: 't-3',
-      titulo: 'Planificar Bloque 3: Textos Periodísticos con asistencia IA',
-      urgencia: 'Media',
-      fechaLimite: '2026-10-29',
-      observaciones: 'Alinear a DCD del currículo priorizado MINEDUC.',
-      modulo: 'Planificación',
-      link: '/planificacion',
-      completada: false
-    },
-    {
-      id: 't-4',
-      titulo: 'Descargar actas de calificaciones y firmas de representantes',
-      urgencia: 'Baja',
-      fechaLimite: '2026-10-31',
-      observaciones: 'Archivo en carpeta de secretaría del plantel.',
-      modulo: 'Workspace',
-      link: '/workspace',
-      completada: false
-    }
-  ]);
 
   // Cálculo de hora en tiempo real para determinar clase en curso
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -137,6 +75,9 @@ export const DashboardPage: React.FC = () => {
       setShowOnboarding(true);
     }
   }, [searchParams]);
+
+  if (loading) return <Skeleton className="h-[600px] w-full" />;
+  if (!data) return <EmptyState mensaje="No hay datos aún" />;
 
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
 
@@ -260,25 +201,24 @@ export const DashboardPage: React.FC = () => {
               <InfoTooltip content="Muestra la clase activa y la siguiente según tu carga horaria semanal." />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Clase en curso (P3.2: sólo se muestra badge si realmente coincide con el horario) */}
-              {claseEnCurso ? (
+            <div className="grid grid-cols-1 gap-3">
+              {data?.resumenHoy?.claseActual ? (
                 <div className="p-3.5 rounded-xl bg-[#176087]/80 border border-[#9ED8ED]/40 flex flex-col justify-between relative overflow-hidden">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
                       En Curso Ahora
                     </span>
-                    <span className="text-xs font-mono font-bold text-white">{claseEnCurso.horario}</span>
+                    <span className="text-xs font-mono font-bold text-white">{data.resumenHoy.claseActual.horario}</span>
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white">{claseEnCurso.paralelo} · {claseEnCurso.materia}</h4>
-                    <p className="text-xs text-[#9ED8ED] mt-0.5">{claseEnCurso.tema}</p>
+                    <h4 className="text-sm font-bold text-white">{data.resumenHoy.claseActual.paralelo} · {data.resumenHoy.claseActual.materia}</h4>
+                    <p className="text-xs text-[#9ED8ED] mt-0.5">{data.resumenHoy.claseActual.tema || 'Actividad docente'}</p>
                   </div>
                   <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-200">{claseEnCurso.aula}</span>
+                    <span className="text-[11px] text-slate-200">{data.resumenHoy.claseActual.aula || 'Aula asignada'}</span>
                     <Link
-                      to={claseEnCurso.link}
+                      to="/asistencia"
                       className="text-xs font-bold text-[#9ED8ED] hover:underline"
                     >
                       Tomar asistencia →
@@ -286,48 +226,12 @@ export const DashboardPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="p-3.5 rounded-xl bg-slate-900/40 border border-slate-700/50 flex flex-col justify-between">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      Sin clase activa
-                    </span>
-                    <span className="text-xs font-mono text-slate-400">Receso / Fuera de aula</span>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-300">Periodo de gestión docente</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">Puedes revisar tareas o avanzar con la planificación PUD.</p>
-                  </div>
-                  <div className="mt-3 pt-2 border-t border-slate-700/50 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-400">Sala de profesores</span>
-                    <Link to="/workspace" className="text-xs font-bold text-[#9ED8ED] hover:underline">
-                      Ir al Workspace →
-                    </Link>
-                  </div>
+                <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-700/50 flex flex-col items-center justify-center text-center py-6">
+                  <Clock className="w-5 h-5 text-slate-400 mb-1.5" />
+                  <h4 className="text-sm font-semibold text-slate-300">Sin clases en curso ahora</h4>
+                  <p className="text-xs text-slate-400 mt-0.5">No hay bloques de clase programados para este momento.</p>
                 </div>
               )}
-
-              {/* Siguiente clase */}
-              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700/60 flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                    Siguiente Bloque
-                  </span>
-                  <span className="text-xs font-mono text-slate-300">10:00 - 11:30</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">9no EGB "B" · Lengua y Literatura</h4>
-                  <p className="text-xs text-slate-300 mt-0.5">Taller de Métrica y Figuras Retóricas</p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-slate-700/60 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400">Aula 102 · Bloque C</span>
-                  <Link
-                    to="/asistencia/par-9no-b"
-                    className="text-xs font-bold text-[#9ED8ED] hover:underline"
-                  >
-                    Tomar asistencia →
-                  </Link>
-                </div>
-              </div>
             </div>
           </div>
         </Card>
@@ -347,11 +251,11 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-2.5">
-            <Link to={paralelosList[0] ? `/asistencia/${paralelosList[0].id}` : '/asistencia'}>
+            <Link to="/asistencia">
               <Button variant="primary" size="md" className="w-full justify-between">
                 <span className="flex items-center gap-2">
                   <UserCheck className="w-4 h-4" />
-                  Tomar asistencia hoy ({paralelosList[0]?.nombre || 'Paralelo'})
+                  Tomar asistencia hoy
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
@@ -398,10 +302,10 @@ export const DashboardPage: React.FC = () => {
             <Calendar className="w-4 h-4 text-[#176087]" />
           </div>
           <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">
-            {dashboardData?.estadisticas?.clasesPlanificadasSemana ?? (paralelosList.length * 4 || 14)}
+            {data?.estadisticas?.clasesPlanificadasSemana ?? 0}
           </div>
           <span className="text-[11px] text-slate-400">
-            {paralelosList.length > 0 ? `${paralelosList.length} paralelos asignados` : '10 dictadas · 4 por dictar'}
+            Horas lectivas semanales
           </span>
         </Card>
 
@@ -411,10 +315,10 @@ export const DashboardPage: React.FC = () => {
             <Clock className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-2xl font-black font-mono text-amber-600 mt-1">
-            {dashboardData?.estadisticas?.actividadesPorCalificar ?? 0}
+            {data?.estadisticas?.actividadesPorCalificar ?? 0}
           </div>
           <span className="text-[11px] text-slate-400">
-            {paralelosList.length > 0 ? `En ${paralelosList.map((p: any) => p.nombre).slice(0, 2).join(' y ')}` : 'Sin tareas pendientes'}
+            Tareas pendientes
           </span>
         </Card>
 
@@ -424,10 +328,10 @@ export const DashboardPage: React.FC = () => {
             <TrendingUp className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="text-2xl font-black font-mono text-emerald-600 mt-1">
-            {dashboardData?.estadisticas?.asistenciaPromedioMes ? `${dashboardData.estadisticas.asistenciaPromedioMes}%` : '95.0%'}
+            {data?.estadisticas?.asistenciaPromedioMes ? `${data.estadisticas.asistenciaPromedioMes}%` : '0%'}
           </div>
           <span className="text-[11px] text-slate-400">
-            {dashboardData?.estadisticas?.totalEstudiantes ?? user?.totalAlumnos ?? (paralelosList.length * 30)} estudiantes activos
+            {data?.estadisticas?.totalEstudiantes ?? 0} estudiantes activos
           </span>
         </Card>
 
@@ -437,7 +341,7 @@ export const DashboardPage: React.FC = () => {
             <BookOpenCheck className="w-4 h-4 text-[#176087]" />
           </div>
           <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">
-            {dashboardData?.estadisticas?.informesGenerados ?? 2}
+            {data?.estadisticas?.informesGenerados ?? 0}
           </div>
           <span className="text-[11px] text-slate-400">
             Planificaciones curriculares
@@ -543,55 +447,65 @@ export const DashboardPage: React.FC = () => {
           )}
 
           {/* Lista de tareas */}
-          <div className="space-y-2">
-            {todoList.map((item) => (
-              <div
-                key={item.id}
-                className={`p-3.5 rounded-xl border transition-all duration-150 flex items-start gap-3 ${
-                  item.completada
-                    ? 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-60'
-                    : 'bg-white dark:bg-[#071727] border-slate-200/80 dark:border-slate-800 shadow-xs'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={item.completada}
-                  onChange={() => handleToggleTodo(item.id)}
-                  className="mt-1 w-4 h-4 rounded text-[#176087] cursor-pointer"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p
-                      className={`text-xs font-semibold text-slate-800 dark:text-slate-100 ${
-                        item.completada ? 'line-through text-slate-400' : ''
-                      }`}
-                    >
-                      {item.titulo}
-                    </p>
-                    {getUrgenciaBadge(item.urgencia)}
-                    {item.fechaLimite && (
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
-                        <Clock className="w-3 h-3" /> {item.fechaLimite}
-                      </span>
+          {todoList.length === 0 ? (
+            <EmptyState
+              mensaje="Aún no has creado tareas"
+              submensaje="Agrega pendientes o recordatorios docentes para mantenerte organizado."
+              accionTexto="Nueva tarea"
+              onAccion={() => setShowTaskForm(true)}
+              className="py-8"
+            />
+          ) : (
+            <div className="space-y-2">
+              {todoList.map((item) => (
+                <div
+                  key={item.id}
+                  className={`p-3.5 rounded-xl border transition-all duration-150 flex items-start gap-3 ${
+                    item.completada
+                      ? 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-60'
+                      : 'bg-white dark:bg-[#071727] border-slate-200/80 dark:border-slate-800 shadow-xs'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={item.completada}
+                    onChange={() => handleToggleTodo(item.id)}
+                    className="mt-1 w-4 h-4 rounded text-[#176087] cursor-pointer"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p
+                        className={`text-xs font-semibold text-slate-800 dark:text-slate-100 ${
+                          item.completada ? 'line-through text-slate-400' : ''
+                        }`}
+                      >
+                        {item.titulo}
+                      </p>
+                      {getUrgenciaBadge(item.urgencia)}
+                      {item.fechaLimite && (
+                        <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                          <Clock className="w-3 h-3" /> {item.fechaLimite}
+                        </span>
+                      )}
+                    </div>
+                    {item.observaciones && (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        {item.observaciones}
+                      </p>
                     )}
                   </div>
-                  {item.observaciones && (
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                      {item.observaciones}
-                    </p>
+                  {item.link && (
+                    <Link
+                      to={item.link}
+                      className="text-xs font-bold text-[#176087] dark:text-[#9ED8ED] hover:underline shrink-0 self-center"
+                    >
+                      Ir →
+                    </Link>
                   )}
                 </div>
-                {item.link && (
-                  <Link
-                    to={item.link}
-                    className="text-xs font-bold text-[#176087] dark:text-[#9ED8ED] hover:underline shrink-0 self-center"
-                  >
-                    Ir →
-                  </Link>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
 
         {/* Últimas Actividades */}
@@ -603,40 +517,26 @@ export const DashboardPage: React.FC = () => {
             <InfoTooltip content="Registro histórico de tus últimas modificaciones en asistencia, notas y planes." />
           </div>
 
-          <div className="space-y-3.5">
-            <div className="flex items-start gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
-              <div>
-                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                  Asistencia registrada en 8vo A
-                </p>
-                <p className="text-[11px] text-slate-500">28 presentes, 1 atraso, 1 justificada</p>
-                <span className="text-[10px] text-slate-400">Hace 45 min</span>
-              </div>
+          {Array.isArray(data?.ultimasActividades) && data.ultimasActividades.length > 0 ? (
+            <div className="space-y-3.5">
+              {data.ultimasActividades.map((act: any, idx: number) => (
+                <div key={act.id || idx} className="flex items-start gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      {act.accion || 'Actividad registrada'}
+                    </p>
+                    <p className="text-[11px] text-slate-500">{act.detalle || ''}</p>
+                    <span className="text-[10px] text-slate-400">{act.tiempo || 'Reciente'}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <div className="flex items-start gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
-              <div>
-                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                  Planificación Bloque 2 aprobada
-                </p>
-                <p className="text-[11px] text-slate-500">Unidad microcurricular generada con IA</p>
-                <span className="text-[10px] text-slate-400">Hace 3 horas</span>
-              </div>
+          ) : (
+            <div className="py-8 text-center text-xs text-slate-400">
+              Aún no tienes actividad reciente registrada.
             </div>
-
-            <div className="flex items-start gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-              <div>
-                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                  5 notas actualizadas en 9no B
-                </p>
-                <p className="text-[11px] text-slate-500">Taller de Figuras Literarias</p>
-                <span className="text-[10px] text-slate-400">Ayer</span>
-              </div>
-            </div>
-          </div>
+          )}
         </Card>
       </div>
 

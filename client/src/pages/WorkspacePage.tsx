@@ -20,13 +20,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Document as DocxDocument, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import jsPDF from 'jspdf';
-import { Card, Button, Badge, InfoTooltip } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
 import { Modal, Drawer } from '../components/ui/Dialogs';
 import {
-  PLANTILLAS_MINEDUC,
-  ACTIVIDADES_INICIALES,
-  PARALELOS_INICIALES,
-  DOCENTE_ACTUAL
+  PLANTILLAS_MINEDUC
 } from '../data/mockData';
 import {
   Briefcase,
@@ -200,56 +197,9 @@ export const WorkspacePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'kanban' | 'plantillas' | 'documentos'>('kanban');
 
   // Kanban State
-  const [tasks, setTasks] = useState<KanbanTaskItem[]>([
-    {
-      id: 'kb-1',
-      titulo: 'Revisar borradores de crónica barrial',
-      descripcion: 'Evaluar coherencia en párrafos descriptivos y uso de conectores temporales.',
-      paralelo: '8vo A',
-      columna: 'En progreso',
-      prioridad: 'Alta',
-      urgencia: 'Alta',
-      fecha: '2026-10-24',
-      fechaLimite: '2026-10-28',
-      observaciones: 'Coordinar con la comisión pedagógica la rúbrica formativa.'
-    },
-    {
-      id: 'kb-2',
-      titulo: 'Subir calificaciones Parcial 1 al sistema',
-      descripcion: 'Cierre del primer parcial con notas de deberes y lección escrita.',
-      paralelo: '9no B',
-      columna: 'Por hacer',
-      prioridad: 'Alta',
-      urgencia: 'Alta',
-      fecha: '2026-10-25',
-      fechaLimite: '2026-10-26',
-      observaciones: 'Verificar estudiantes con justificativo médico antes de cerrar el acta.'
-    },
-    {
-      id: 'kb-3',
-      titulo: 'Convocatoria a reunión de representantes',
-      descripcion: 'Socialización del rendimiento y compromisos de refuerzo.',
-      paralelo: '8vo A',
-      columna: 'Completado',
-      prioridad: 'Media',
-      urgencia: 'Media',
-      fecha: '2026-10-21',
-      fechaLimite: '2026-10-22',
-      observaciones: 'Asistencia del 88% de padres de familia.'
-    },
-    {
-      id: 'kb-4',
-      titulo: 'Preparar material para el bloque 3',
-      descripcion: 'Diseño de diapositivas interactivas y fichas de lectura sobre lírica ecuatoriana.',
-      paralelo: '8vo A',
-      columna: 'Por hacer',
-      prioridad: 'Baja',
-      urgencia: 'Baja',
-      fecha: '2026-10-30',
-      fechaLimite: '2026-11-05',
-      observaciones: 'Revisar antología de poetas guayaquileños y cuencanos.'
-    }
-  ]);
+  const [tasks, setTasks] = useState<KanbanTaskItem[]>([]);
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   // Sensores de @dnd-kit
   const sensors = useSensors(
@@ -281,38 +231,7 @@ export const WorkspacePage: React.FC = () => {
   const [templateSavedSuccess, setTemplateSavedSuccess] = useState(false);
 
   // Mis Documentos (P2.4 & P3.10)
-  const [documentos, setDocumentos] = useState<DocumentoItem[]>([
-    {
-      id: 'doc-1',
-      nombre: 'Plan_Curricular_Anual_Lengua_8vo.pdf',
-      categoria: 'Planificación',
-      descripcion: 'PCA oficial aprobado por vicerrectorado periodo 2026-2027',
-      tamano: '380 KB',
-      tipo: 'PDF',
-      fechaSubida: '12/03/2026',
-      contenidoBase64: 'JVBERi0xLjQKJcTl8uXrp/Og0MTGCjQgMCBvYmoKPDwgL0xlbmd0aCA1OSAvRmlsdGVyIC9GbGF0ZURlY29kZSA+PgpzdHJlYW0KeJwrSExPT1HIzFPSUUpMzs8tLslPzlDISSxJLQIyQzJSgYKVkmlqSgEAg3kNEwo=endstream'
-    },
-    {
-      id: 'doc-2',
-      nombre: 'Acta_Junta_Curso_1er_Quimestre.pdf',
-      categoria: 'Institucional',
-      descripcion: 'Acta formal con resoluciones de rendimiento',
-      tamano: '210 KB',
-      tipo: 'PDF',
-      fechaSubida: '28/03/2026',
-      contenidoBase64: 'JVBERi0xLjQKJcTl8uXrp/Og0MTGCjQgMCBvYmoKPDwgL0xlbmd0aCA1OSAvRmlsdGVyIC9GbGF0ZURlY29kZSA+PgpzdHJlYW0KeJwrSExPT1HIzFPSUUpMzs8tLslPzlDISSxJLQIyQzJSgYKVkmlqSgEAg3kNEwo=endstream'
-    },
-    {
-      id: 'doc-3',
-      nombre: 'PRAI_Estudiantes_En_Riesgo.docx',
-      categoria: 'Estudiante',
-      descripcion: 'Planes de refuerzo académico individualizados',
-      tamano: '145 KB',
-      tipo: 'DOCX',
-      fechaSubida: '04/04/2026',
-      contenidoBase64: 'UEsDBBQAAAAIAAAAAAAAAAAAAAAAAAAAAAAIAAAAd29yZC9kb2N1bWVudC54bWw='
-    }
-  ]);
+  const [documentos, setDocumentos] = useState<DocumentoItem[]>([]);
 
   // Modal Subir Documento con clasificación (P3.10)
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -323,22 +242,25 @@ export const WorkspacePage: React.FC = () => {
   const [uploadBase64, setUploadBase64] = useState('');
   const [filterCategoria, setFilterCategoria] = useState<string>('Todos');
 
-  // Cargar tareas y documentos del servidor al iniciar
+  // Cargar tareas y documentos del servidor al iniciar con patrón exacto
   useEffect(() => {
-    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-
-    fetch(`${API_URL}/api/workspace/kanban`, { headers: authHeaders })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.kanbanTasks) setTasks(data.kanbanTasks);
+    fetch(`${API_URL}/api/workspace/kanban`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
+        if (d?.kanbanTasks) setTasks(d.kanbanTasks);
       })
-      .catch(() => {});
+      .finally(() => setLoading(false));
 
-    fetch(`${API_URL}/api/workspace/documentos`, { headers: authHeaders })
+    fetch(`${API_URL}/api/workspace/documentos`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.documentos && Array.isArray(data.documentos)) {
-          const normalized = data.documentos.map((d: any, idx: number) => ({
+      .then((docsData) => {
+        if (docsData?.documentos && Array.isArray(docsData.documentos)) {
+          const normalized = docsData.documentos.map((d: any, idx: number) => ({
             ...d,
             id: String(d.id || d._id || `doc-${idx}`)
           }));
@@ -346,7 +268,7 @@ export const WorkspacePage: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, [token]);
+  }, []);
 
   // Manejador de Drag End en Kanban (P3.9)
   const handleDragEnd = (event: DragEndEvent) => {
@@ -678,6 +600,9 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
       ? documentos
       : documentos.filter((d) => d.categoria === filterCategoria);
 
+  if (loading) return <Skeleton className="h-96 w-full" />;
+  if (!data) return <EmptyState mensaje="No hay datos aún" />;
+
   return (
     <div className="space-y-6 text-left">
       {/* 1. Encabezado principal con InfoTooltip (P3.1) */}
@@ -747,40 +672,49 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
             </Button>
           </div>
 
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <KanbanColumn
-                id="Por hacer"
-                title="Por Hacer"
-                count={tasks.filter((t) => t.columna === 'Por hacer').length}
-                tasks={tasks.filter((t) => t.columna === 'Por hacer')}
-                color="bg-slate-400"
-                onTaskClick={(t) => setSelectedTask(t)}
-              />
+          {tasks.length === 0 ? (
+            <EmptyState
+              mensaje="Aún no has creado tareas"
+              submensaje="Organiza tus pendientes docentes, revisiones de exámenes y convocatorias con el tablero Kanban."
+              accionTexto="Nueva tarea"
+              onAccion={() => setShowNewTaskModal(true)}
+            />
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <KanbanColumn
+                  id="Por hacer"
+                  title="Por Hacer"
+                  count={tasks.filter((t) => t.columna === 'Por hacer').length}
+                  tasks={tasks.filter((t) => t.columna === 'Por hacer')}
+                  color="bg-slate-400"
+                  onTaskClick={(t) => setSelectedTask(t)}
+                />
 
-              <KanbanColumn
-                id="En progreso"
-                title="En Progreso"
-                count={tasks.filter((t) => t.columna === 'En progreso').length}
-                tasks={tasks.filter((t) => t.columna === 'En progreso')}
-                color="bg-amber-500"
-                onTaskClick={(t) => setSelectedTask(t)}
-              />
+                <KanbanColumn
+                  id="En progreso"
+                  title="En Progreso"
+                  count={tasks.filter((t) => t.columna === 'En progreso').length}
+                  tasks={tasks.filter((t) => t.columna === 'En progreso')}
+                  color="bg-amber-500"
+                  onTaskClick={(t) => setSelectedTask(t)}
+                />
 
-              <KanbanColumn
-                id="Completado"
-                title="Completado"
-                count={tasks.filter((t) => t.columna === 'Completado').length}
-                tasks={tasks.filter((t) => t.columna === 'Completado')}
-                color="bg-emerald-500"
-                onTaskClick={(t) => setSelectedTask(t)}
-              />
-            </div>
-          </DndContext>
+                <KanbanColumn
+                  id="Completado"
+                  title="Completado"
+                  count={tasks.filter((t) => t.columna === 'Completado').length}
+                  tasks={tasks.filter((t) => t.columna === 'Completado')}
+                  color="bg-emerald-500"
+                  onTaskClick={(t) => setSelectedTask(t)}
+                />
+              </div>
+            </DndContext>
+          )}
         </div>
       )}
 

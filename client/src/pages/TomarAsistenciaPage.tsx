@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { API_URL } from '../config/api';
-import { PARALELOS_INICIALES, Estudiante } from '../data/mockData';
+import type { Estudiante } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge, InfoTooltip } from '../components/ui';
+import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
 import { StudentProfileModal } from '../components/student/StudentProfileModal';
 import {
   UserCheck,
@@ -29,57 +29,52 @@ interface RegistroEstado {
 export const TomarAsistenciaPage: React.FC = () => {
   const { cursoId } = useParams<{ cursoId: string }>();
   const { token } = useAuth();
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'toma' | 'historial'>('toma');
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
   const [guardadoExitoso, setGuardadoExitoso] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Estudiante | null>(null);
 
-  const fallbackParalelo = PARALELOS_INICIALES.find((p) => p.id === cursoId) || PARALELOS_INICIALES[0];
-  const [paralelo, setParalelo] = useState<any>(fallbackParalelo);
-  const [estudiantes, setEstudiantes] = useState<Estudiante[]>(fallbackParalelo.estudiantes);
-
-  // Estado de registros de asistencia para la fecha seleccionada
+  const [paralelo, setParalelo] = useState<any>({
+    id: cursoId || '',
+    nombre: '',
+    materia: '',
+    jornada: 'Matutina'
+  });
+  const [estudiantes, setEstudiantes] = useState<Estudiante[]>([]);
   const [registros, setRegistros] = useState<Record<string, RegistroEstado>>({});
 
   useEffect(() => {
-    let isMounted = true;
-    if (!cursoId) return;
-
     fetch(`${API_URL}/api/asistencia/${cursoId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      headers: { Authorization: `Bearer ${token}` }
     })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!isMounted || !data?.success) return;
-
-        if (data.paralelo) {
-          setParalelo((prev: any) => ({
-            ...prev,
-            ...data.paralelo,
-            id: data.paralelo.id || cursoId
-          }));
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
+        if (d?.paralelo) {
+          setParalelo(d.paralelo);
         }
-
-        if (Array.isArray(data.asistenciaHoy) && data.asistenciaHoy.length > 0) {
-          const loadedEstudiantes: Estudiante[] = data.asistenciaHoy.map((a: any, idx: number) => ({
+        if (Array.isArray(d?.asistenciaHoy)) {
+          const loadedEstudiantes: Estudiante[] = d.asistenciaHoy.map((a: any, idx: number) => ({
             id: a.estudianteId || `${cursoId}-est-${idx + 1}`,
             nombre: a.nombre,
-            cedula: a.cedula || '0900000000',
+            cedula: a.cedula || '',
             numeroLista: a.numeroLista || idx + 1,
             activo: true,
-            telefonoRepresentante: a.telefonoRepresentante || '+593 99 123 4567',
-            asistenciaMes: 95,
+            telefonoRepresentante: a.telefonoRepresentante || '',
+            asistenciaMes: 100,
             faltasJustificadas: a.faltasJustificadas || 0,
             faltasInjustificadas: a.faltasInjustificadas || 0,
             atrasos: a.atrasos || 0,
-            promedioGeneral: 8.5,
+            promedioGeneral: 0,
             observaciones: []
           }));
           setEstudiantes(loadedEstudiantes);
 
           const initReg: Record<string, RegistroEstado> = {};
-          data.asistenciaHoy.forEach((a: any) => {
+          d.asistenciaHoy.forEach((a: any) => {
             initReg[a.estudianteId] = {
               estudianteId: a.estudianteId,
               estado: a.estado || 'P',
@@ -90,14 +85,8 @@ export const TomarAsistenciaPage: React.FC = () => {
           setRegistros(initReg);
         }
       })
-      .catch((err) => {
-        console.warn('Usando fallback para estudiantes de asistencia:', err);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [cursoId, token]);
+      .finally(() => setLoading(false));
+  }, [cursoId]);
 
   const handleEstadoChange = (estId: string, estado: 'P' | 'A' | 'F') => {
     setRegistros((prev) => ({
@@ -170,6 +159,9 @@ export const TomarAsistenciaPage: React.FC = () => {
   const presentes = Object.values(registros).filter((r) => r.estado === 'P').length;
   const atrasos = Object.values(registros).filter((r) => r.estado === 'A').length;
   const faltas = Object.values(registros).filter((r) => r.estado === 'F').length;
+
+  if (loading) return <Skeleton className="h-96 w-full" />;
+  if (!data) return <EmptyState mensaje="No hay datos aún" />;
 
   return (
     <div className="space-y-6 text-left">
@@ -312,6 +304,149 @@ export const TomarAsistenciaPage: React.FC = () => {
           )}
 
           {/* Tabla de toma de asistencia */}
+          {estudiantes.length === 0 ? (
+            <EmptyState
+              mensaje="No hay estudiantes en este curso"
+              submensaje="Este paralelo aún no cuenta con alumnos matriculados para tomar asistencia."
+            />
+          ) : (
+            <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800">
+              <div className="overflow-x-auto scrollbar-none">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#176087] text-white border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-3 w-12 text-center font-mono">Nº</th>
+                      <th className="py-3 px-4 font-semibold">Estudiante</th>
+                      <th className="py-3 px-3 text-center font-semibold w-52">Estado</th>
+                      <th className="py-3 px-4 font-semibold">Justificación / Motivo</th>
+                      <th className="py-3 px-3 text-center font-semibold w-20">Ficha</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {estudiantes.map((est) => {
+                      const reg = registros[est.id] || { estado: 'P', justificada: false, motivo: '' };
+
+                      return (
+                        <tr
+                          key={est.id}
+                          className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                            reg.estado === 'F' ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''
+                          }`}
+                        >
+                          <td className="py-3 px-3 text-center font-mono text-slate-400 font-bold">
+                            {est.numeroLista}
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedStudent(est)}
+                              className="font-bold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] text-left cursor-pointer"
+                            >
+                              {est.nombre}
+                            </button>
+                            <span className="text-[10px] text-slate-400 font-mono block">
+                              CI: {est.cedula}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            {/* Segmented control P / A / F */}
+                            <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
+                              <button
+                                type="button"
+                                onClick={() => handleEstadoChange(est.id, 'P')}
+                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                                  reg.estado === 'P'
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                                }`}
+                                title="Presente"
+                              >
+                                P
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEstadoChange(est.id, 'A')}
+                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                                  reg.estado === 'A'
+                                    ? 'bg-amber-500 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                                }`}
+                                title="Atraso"
+                              >
+                                A
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEstadoChange(est.id, 'F')}
+                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                                  reg.estado === 'F'
+                                    ? 'bg-rose-600 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                                }`}
+                                title="Falta"
+                              >
+                                F
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            {reg.estado === 'F' ? (
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none shrink-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={reg.justificada}
+                                    onChange={(e) => handleJustificadaChange(est.id, e.target.checked)}
+                                    className="rounded text-[#176087]"
+                                  />
+                                  Justificada
+                                </label>
+
+                                {reg.justificada && (
+                                  <input
+                                    type="text"
+                                    placeholder="Motivo (ej: certificado médico, calamidad doméstica)"
+                                    value={reg.motivo}
+                                    onChange={(e) => handleMotivoChange(est.id, e.target.value)}
+                                    className="w-full text-xs px-2.5 py-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-800 dark:text-white"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">
+                                {reg.estado === 'A' ? 'Atraso en jornada matutina' : 'Asistencia normal'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedStudent(est)}
+                              className="p-1 rounded text-slate-400 hover:text-[#176087] dark:hover:text-[#9ED8ED] cursor-pointer"
+                              title="Ver ficha del estudiante"
+                            >
+                              <User className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* PESTAÑA 2: HISTORIAL MENSUAL CON % DE FALTAS (P3.3) */}
+      {activeTab === 'historial' && (
+        estudiantes.length === 0 ? (
+          <EmptyState
+            mensaje="No hay registros históricos"
+            submensaje="No se encontraron estudiantes registrados para generar el reporte de asistencia mensual."
+          />
+        ) : (
           <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800">
             <div className="overflow-x-auto scrollbar-none">
               <table className="w-full text-left text-xs">
@@ -319,20 +454,28 @@ export const TomarAsistenciaPage: React.FC = () => {
                   <tr>
                     <th className="py-3 px-3 w-12 text-center font-mono">Nº</th>
                     <th className="py-3 px-4 font-semibold">Estudiante</th>
-                    <th className="py-3 px-3 text-center font-semibold w-52">Estado</th>
-                    <th className="py-3 px-4 font-semibold">Justificación / Motivo</th>
-                    <th className="py-3 px-3 text-center font-semibold w-20">Ficha</th>
+                    <th className="py-3 px-3 text-center font-semibold">Asistencia Mes</th>
+                    <th className="py-3 px-3 text-center font-semibold">Atrasos</th>
+                    <th className="py-3 px-3 text-center font-semibold">Faltas Justificadas</th>
+                    <th className="py-3 px-3 text-center font-semibold">Faltas Injustificadas</th>
+                    {/* Columna final con % de faltas (P3.3) */}
+                    <th className="py-3 px-4 text-center font-bold bg-[#134d6d]">
+                      % Faltas
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {estudiantes.map((est) => {
-                    const reg = registros[est.id] || { estado: 'P', justificada: false, motivo: '' };
+                    const totalDias = 20;
+                    const totalFaltas = (est.faltasJustificadas || 0) + (est.faltasInjustificadas || 0);
+                    const porcentajeFaltas = Number(((totalFaltas / totalDias) * 100).toFixed(1));
+                    const esAlerta = porcentajeFaltas > 15;
 
                     return (
                       <tr
                         key={est.id}
                         className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
-                          reg.estado === 'F' ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''
+                          esAlerta ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
                         }`}
                       >
                         <td className="py-3 px-3 text-center font-mono text-slate-400 font-bold">
@@ -350,85 +493,29 @@ export const TomarAsistenciaPage: React.FC = () => {
                             CI: {est.cedula}
                           </span>
                         </td>
-                        <td className="py-3 px-3 text-center">
-                          {/* Segmented control P / A / F */}
-                          <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => handleEstadoChange(est.id, 'P')}
-                              className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                                reg.estado === 'P'
-                                  ? 'bg-emerald-600 text-white shadow-xs'
-                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                              }`}
-                              title="Presente"
-                            >
-                              P
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleEstadoChange(est.id, 'A')}
-                              className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                                reg.estado === 'A'
-                                  ? 'bg-amber-500 text-white shadow-xs'
-                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                              }`}
-                              title="Atraso"
-                            >
-                              A
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleEstadoChange(est.id, 'F')}
-                              className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                                reg.estado === 'F'
-                                  ? 'bg-rose-600 text-white shadow-xs'
-                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                              }`}
-                              title="Falta"
-                            >
-                              F
-                            </button>
-                          </div>
+                        <td className="py-3 px-3 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {est.asistenciaMes}%
                         </td>
-                        <td className="py-3 px-4">
-                          {reg.estado === 'F' ? (
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none shrink-0">
-                                <input
-                                  type="checkbox"
-                                  checked={reg.justificada}
-                                  onChange={(e) => handleJustificadaChange(est.id, e.target.checked)}
-                                  className="rounded text-[#176087]"
-                                />
-                                Justificada
-                              </label>
-
-                              {reg.justificada && (
-                                <input
-                                  type="text"
-                                  placeholder="Motivo (ej: certificado médico, calamidad doméstica)"
-                                  value={reg.motivo}
-                                  onChange={(e) => handleMotivoChange(est.id, e.target.value)}
-                                  className="w-full text-xs px-2.5 py-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-800 dark:text-white"
-                                />
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 text-[11px]">
-                              {reg.estado === 'A' ? 'Atraso en jornada matutina' : 'Asistencia normal'}
-                            </span>
-                          )}
+                        <td className="py-3 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                          {est.atrasos}
                         </td>
-                        <td className="py-3 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedStudent(est)}
-                            className="p-1 rounded text-slate-400 hover:text-[#176087] dark:hover:text-[#9ED8ED] cursor-pointer"
-                            title="Ver ficha del estudiante"
+                        <td className="py-3 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                          {est.faltasJustificadas}
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono text-rose-600 dark:text-rose-400 font-bold">
+                          {est.faltasInjustificadas}
+                        </td>
+                        {/* Columna final con % de faltas (P3.3) */}
+                        <td className="py-3 px-4 text-center font-mono font-bold">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs ${
+                              esAlerta
+                                ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-black'
+                                : 'text-slate-700 dark:text-slate-300'
+                            }`}
                           >
-                            <User className="w-4 h-4" />
-                          </button>
+                            {porcentajeFaltas}%
+                          </span>
                         </td>
                       </tr>
                     );
@@ -437,88 +524,7 @@ export const TomarAsistenciaPage: React.FC = () => {
               </table>
             </div>
           </Card>
-        </div>
-      )}
-
-      {/* PESTAÑA 2: HISTORIAL MENSUAL CON % DE FALTAS (P3.3) */}
-      {activeTab === 'historial' && (
-        <Card className="overflow-hidden p-0 border-slate-200 dark:border-slate-800">
-          <div className="overflow-x-auto scrollbar-none">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#176087] text-white border-b border-slate-800">
-                <tr>
-                  <th className="py-3 px-3 w-12 text-center font-mono">Nº</th>
-                  <th className="py-3 px-4 font-semibold">Estudiante</th>
-                  <th className="py-3 px-3 text-center font-semibold">Asistencia Mes</th>
-                  <th className="py-3 px-3 text-center font-semibold">Atrasos</th>
-                  <th className="py-3 px-3 text-center font-semibold">Faltas Justificadas</th>
-                  <th className="py-3 px-3 text-center font-semibold">Faltas Injustificadas</th>
-                  {/* Columna final con % de faltas (P3.3) */}
-                  <th className="py-3 px-4 text-center font-bold bg-[#134d6d]">
-                    % Faltas
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {estudiantes.map((est) => {
-                  const totalDias = 20;
-                  const totalFaltas = (est.faltasJustificadas || 0) + (est.faltasInjustificadas || 0);
-                  const porcentajeFaltas = Number(((totalFaltas / totalDias) * 100).toFixed(1));
-                  const esAlerta = porcentajeFaltas > 15;
-
-                  return (
-                    <tr
-                      key={est.id}
-                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
-                        esAlerta ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
-                      }`}
-                    >
-                      <td className="py-3 px-3 text-center font-mono text-slate-400 font-bold">
-                        {est.numeroLista}
-                      </td>
-                      <td className="py-3 px-4">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedStudent(est)}
-                          className="font-bold text-slate-900 dark:text-white hover:text-[#176087] dark:hover:text-[#9ED8ED] text-left cursor-pointer"
-                        >
-                          {est.nombre}
-                        </button>
-                        <span className="text-[10px] text-slate-400 font-mono block">
-                          CI: {est.cedula}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        {est.asistenciaMes}%
-                      </td>
-                      <td className="py-3 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
-                        {est.atrasos}
-                      </td>
-                      <td className="py-3 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
-                        {est.faltasJustificadas}
-                      </td>
-                      <td className="py-3 px-3 text-center font-mono text-rose-600 dark:text-rose-400 font-bold">
-                        {est.faltasInjustificadas}
-                      </td>
-                      {/* Columna final con % de faltas (P3.3) */}
-                      <td className="py-3 px-4 text-center font-mono font-bold">
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs ${
-                            esAlerta
-                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-black'
-                              : 'text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          {porcentajeFaltas}%
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        )
       )}
 
       {/* Student Profile Modal */}
