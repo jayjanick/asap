@@ -816,6 +816,19 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
+app.get('/api/debug', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    mongo: isMongoConnected(),
+    mongoState: mongoose.connection.readyState,
+    env: process.env.NODE_ENV || 'development',
+    hasMongoUri: Boolean(process.env.MONGODB_URI && !process.env.MONGODB_URI.includes('usuario:password')),
+    hasJwtSecret: Boolean(process.env.JWT_SECRET),
+    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    time: new Date().toISOString()
+  });
+});
+
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -1588,11 +1601,13 @@ app.get('/api/workspace', (_req: Request, res: Response) => {
   res.json({ success: true, kanbanTasks, plantillas: PLANTILLAS_MINEDUC, actividades: actividadesState, documentos: documentosState });
 });
 
-app.get('/api/workspace/documentos', async (_req: Request, res: Response) => {
+app.get('/api/workspace/documentos', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const docs = await Documento.find().sort({ createdAt: -1 });
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || 'docente-1';
+      const docs = await Documento.find({ docenteId }).sort({ createdAt: -1 });
       if (docs && docs.length > 0) return res.json({ success: true, documentos: docs });
     } catch (e) {}
   }
@@ -1600,21 +1615,43 @@ app.get('/api/workspace/documentos', async (_req: Request, res: Response) => {
 });
 
 app.post('/api/workspace/documentos', async (req: Request, res: Response) => {
-  const nuevoDoc = { id: `doc-${Date.now()}`, fechaSubida: new Date().toLocaleDateString('es-EC'), ...req.body };
+  const userPayload = getUserFromToken(req);
+  const docenteId = userPayload?.id || 'docente-1';
+  const nuevoDoc = { id: `doc-${Date.now()}`, fechaSubida: new Date().toLocaleDateString('es-EC'), docenteId, ...req.body };
   documentosState.unshift(nuevoDoc);
   await connectDB();
   if (isMongoConnected()) {
-    try { await Documento.create(nuevoDoc); } catch (e) {}
+    try {
+      const { nombre, categoria, descripcion, tamano, tipo, contenidoBase64, url } = req.body;
+      const created = await Documento.create({
+        nombre,
+        categoria,
+        descripcion,
+        tamano,
+        tipo,
+        contenidoBase64,
+        url,
+        docenteId
+      });
+      return res.status(201).json({ success: true, documento: created });
+    } catch (e) {}
   }
   res.status(201).json({ success: true, documento: nuevoDoc });
 });
 
 app.delete('/api/workspace/documentos/:id', async (req: Request, res: Response) => {
-  documentosState = documentosState.filter(d => d.id !== req.params.id);
+  const { id } = req.params;
   await connectDB();
   if (isMongoConnected()) {
-    try { await Documento.findByIdAndDelete(req.params.id); } catch (e) {}
+    try {
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id || 'docente-1';
+      const deleted = await Documento.findOneAndDelete({ _id: id, docenteId });
+      if (!deleted) return res.status(404).json({ success: false, error: 'Documento no encontrado' });
+      return res.json({ success: true, message: 'Documento eliminado' });
+    } catch (e) {}
   }
+  documentosState = documentosState.filter(d => d.id !== id);
   res.json({ success: true });
 });
 
