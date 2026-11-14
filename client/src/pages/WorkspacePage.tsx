@@ -218,7 +218,8 @@ export const WorkspacePage: React.FC = () => {
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
-  const [newParalelo, setNewParalelo] = useState('8vo A');
+  const [newParalelo, setNewParalelo] = useState('General');
+  const [paralelosDocente, setParalelosDocente] = useState<any[]>([]);
   const [newUrgencia, setNewUrgencia] = useState<'Alta' | 'Media' | 'Baja'>('Media');
   const [newFechaLimite, setNewFechaLimite] = useState('');
   const [newObservaciones, setNewObservaciones] = useState('');
@@ -268,7 +269,19 @@ export const WorkspacePage: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, []);
+
+    fetch(`${API_URL}/api/paralelos`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((pData) => {
+        if (pData?.paralelos && Array.isArray(pData.paralelos) && pData.paralelos.length > 0) {
+          setParalelosDocente(pData.paralelos);
+          setNewParalelo(pData.paralelos[0].nombre);
+        }
+      })
+      .catch(() => {});
+  }, [token]);
 
   // Manejador de Drag End en Kanban (P3.9)
   const handleDragEnd = (event: DragEndEvent) => {
@@ -439,7 +452,10 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
     try {
       await fetch(`${API_URL}/api/workspace/documentos`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(nuevoDoc)
       });
     } catch {}
@@ -928,8 +944,11 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
                   onChange={(e) => setNewParalelo(e.target.value)}
                   className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
                 >
-                  <option value="8vo A">8vo EGB "A"</option>
-                  <option value="9no B">9no EGB "B"</option>
+                  {paralelosDocente.map((p) => (
+                    <option key={p.id} value={p.nombre}>
+                      {p.nombre}
+                    </option>
+                  ))}
                   <option value="General">General / Institucional</option>
                 </select>
               </div>

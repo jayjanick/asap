@@ -216,6 +216,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('asap_token') : null);
+    if (currentToken) {
+      fetch(`${API_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${currentToken}` }
+      }).catch(() => {});
+    }
     setUser(null);
     setToken(null);
     setAuthError(null);

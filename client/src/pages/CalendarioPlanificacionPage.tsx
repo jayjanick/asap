@@ -63,7 +63,7 @@ export const CalendarioPlanificacionPage: React.FC = () => {
           materia: plan.materia || 'Lengua y Literatura',
           tema: sc.tema || plan.titulo,
           destreza: plan.destreza || '',
-          actividad: sc.actividad || 'Clase regular',
+          actividad: sc.actividad || sc.actividadSugerida || 'Clase regular',
           color: planIdx % 2 === 0 ? 'bg-[#176087]' : 'bg-indigo-600'
         });
       });
@@ -145,7 +145,7 @@ export const CalendarioPlanificacionPage: React.FC = () => {
           mensaje="Aún no has programado clases"
           submensaje="Crea tu primera planificación curricular para visualizar la distribución de clases en el calendario."
           accionTexto="Crear planificación"
-          onAccion={() => navigate('/planificacion/crear')}
+          onAccion={() => navigate('/planificacion')}
         />
       ) : (
         <Card className="p-0 overflow-hidden border-slate-200 dark:border-slate-800 shadow-md">

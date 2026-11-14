@@ -616,9 +616,9 @@ Responde ÚNICAMENTE en JSON válido con la siguiente estructura exacta:
     while (attempts < 2) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-1.5-flash',
+          model: 'gemini-4-hydrogen',
           contents: prompt,
-          config: { responseMimeType: 'application/json', temperature: 0.3 }
+          config: { responseMimeType: 'application/json' }
         });
         const text = response?.text?.trim() || '';
         const parsed = JSON.parse(text);
@@ -651,9 +651,9 @@ export async function generarActividad(params: { materia: string; destreza: stri
   if (ai) {
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
-        config: { responseMimeType: 'application/json', temperature: 0.4 }
+        config: { responseMimeType: 'application/json' }
       });
       const parsed = JSON.parse(response?.text?.trim() || '{}');
       return { ...parsed, generadaIA: true };
@@ -683,9 +683,9 @@ export async function analizarRendimientoGrupo(params: {
     try {
       const prompt = `Analiza el estado académico del paralelo "${params.paraleloNombre}" en "${params.materia}" (promedio ${params.promedioGeneral}). Responde en JSON con diagnosticoBreve, puntosAlerta, estrategiasRefuerzo, recomendacionDirectivo.`;
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
-        config: { responseMimeType: 'application/json', temperature: 0.3 }
+        config: { responseMimeType: 'application/json' }
       });
       return JSON.parse(response?.text?.trim() || '{}');
     } catch (e) {}
@@ -704,9 +704,9 @@ export async function generarInformeInstitucional(params: any) {
     try {
       const prompt = `Redacta un informe oficial MINEDUC para ${params.paraleloNombre}. Responde en JSON con codigoDocumento, titulo, antecedentes, desarrollo, conclusiones, recomendaciones.`;
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
-        config: { responseMimeType: 'application/json', temperature: 0.3 }
+        config: { responseMimeType: 'application/json' }
       });
       return JSON.parse(response?.text?.trim() || '{}');
     } catch (e) {}
@@ -1090,6 +1090,12 @@ app.get('/api/auth/me', async (req: Request, res: Response) => {
     await connectDB();
     if (isMongoConnected()) {
       try {
+        if (userPayload.tokenId) {
+          const sesionDoc = await Sesion.findOne({ tokenId: userPayload.tokenId });
+          if (!sesionDoc || sesionDoc.revocado !== false) {
+            return res.status(401).json({ success: false, error: 'Sesión revocada o inválida' });
+          }
+        }
         const dbUser = await Usuario.findById(userPayload.id) || await Usuario.findOne({ email: userPayload.email });
         if (dbUser) {
           return res.json({
@@ -1429,69 +1435,108 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
 app.get('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   const { cursoId } = req.params;
   const fechaHoy = new Date().toISOString().slice(0, 10);
+  const fechaConsulta =
+    typeof req.query.fecha === 'string' && req.query.fecha.trim()
+      ? req.query.fecha.trim()
+      : fechaHoy;
 
   await connectDB();
   if (isMongoConnected()) {
     try {
-      let paraleloDoc = cursoId.match(/^[0-9a-fA-F]{24}$/) ? await Paralelo.findById(cursoId) : await Paralelo.findOne({ nombre: cursoId });
-      if (!paraleloDoc) {
-        paraleloDoc = await Paralelo.findOne();
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id ? String(userPayload.id) : null;
+      const isDocenteObjectId = docenteId && /^[a-f\d]{24}$/i.test(docenteId);
+      const docenteCondition = docenteId
+        ? isDocenteObjectId
+          ? { $or: [{ docenteId }, { docenteId: new mongoose.Types.ObjectId(docenteId) }] }
+          : { docenteId }
+        : {};
+
+      let paraleloDoc = null;
+      if (cursoId && cursoId !== 'default') {
+        if (/^[0-9a-fA-F]{24}$/.test(cursoId)) {
+          paraleloDoc = await Paralelo.findOne({ _id: cursoId, ...docenteCondition });
+        } else {
+          paraleloDoc = await Paralelo.findOne({ nombre: cursoId, ...docenteCondition });
+        }
       }
-      if (paraleloDoc) {
-        const alumnos = await Alumno.find({
-          $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }]
-        }).sort({ numeroLista: 1, nombre: 1 });
-        const asistenciaDoc = await Asistencia.findOne({
-          $or: [{ paraleloId: paraleloDoc._id.toString() }, { paraleloId: cursoId }],
-          fecha: fechaHoy
-        });
+      if (!paraleloDoc && docenteId) {
+        paraleloDoc = await Paralelo.findOne(docenteCondition);
+      }
 
-        const paraleloObj = {
-          id: paraleloDoc._id.toString(),
-          nombre: paraleloDoc.nombre,
-          grado: paraleloDoc.grado,
-          jornada: paraleloDoc.jornada || 'Matutina',
-          materia: paraleloDoc.materia || 'General'
-        };
-
-        const asistenciaHoy = alumnos.map((est: any, idx: number) => {
-          const reg = asistenciaDoc?.registros?.find((r: any) => r.estudianteId === est._id.toString());
-          return {
-            estudianteId: est._id.toString(),
-            nombre: est.nombre,
-            numeroLista: est.numeroLista || idx + 1,
-            cedula: est.cedula || '',
-            estado: reg?.estado || (idx === 4 ? 'F' : idx === 12 ? 'A' : 'P'),
-            justificada: reg ? reg.justificada : idx === 4,
-            motivo: reg?.motivo || (idx === 4 ? 'Cita médica' : ''),
-            faltasJustificadas: est.faltasJustificadas || 0,
-            faltasInjustificadas: est.faltasInjustificadas || 0,
-            atrasos: est.atrasos || 0,
-            porcentajeFaltas: 2.5
-          };
-        });
-
+      if (!paraleloDoc) {
         return res.json({
           success: true,
-          paralelo: paraleloObj,
-          fecha: fechaHoy,
-          asistenciaHoy
+          paralelo: { id: '', nombre: '', grado: 8, jornada: 'Matutina', materia: '' },
+          fecha: fechaConsulta,
+          registroExistente: false,
+          asistenciaHoy: []
         });
       }
+
+      const paraleloIdStr = paraleloDoc._id.toString();
+      const alumnos = await Alumno.find({
+        $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloIdStr }]
+      }).sort({ numeroLista: 1, nombre: 1 });
+      const asistenciaDoc = await Asistencia.findOne({
+        $or: [{ paraleloId: paraleloIdStr }, { paraleloId: cursoId }],
+        fecha: fechaConsulta
+      });
+
+      const paraleloObj = {
+        id: paraleloIdStr,
+        nombre: paraleloDoc.nombre,
+        grado: paraleloDoc.grado,
+        jornada: paraleloDoc.jornada || 'Matutina',
+        materia: paraleloDoc.materia || paraleloDoc.materias?.[0] || 'General'
+      };
+
+      const asistenciaHoy = alumnos.map((est: any, idx: number) => {
+        const reg = asistenciaDoc?.registros?.find((r: any) => r.estudianteId === est._id.toString());
+        return {
+          estudianteId: est._id.toString(),
+          nombre: est.nombre,
+          numeroLista: est.numeroLista || idx + 1,
+          cedula: est.cedula || '',
+          estado: reg?.estado || '',
+          justificada: reg ? Boolean(reg.justificada) : false,
+          motivo: reg?.motivo || '',
+          faltasJustificadas: est.faltasJustificadas || 0,
+          faltasInjustificadas: est.faltasInjustificadas || 0,
+          atrasos: est.atrasos || 0,
+          porcentajeFaltas: 0
+        };
+      });
+
+      return res.json({
+        success: true,
+        paralelo: paraleloObj,
+        fecha: fechaConsulta,
+        registroExistente: Boolean(asistenciaDoc),
+        asistenciaHoy
+      });
     } catch (err) {
       console.warn('Error leyendo asistencia de MongoDB:', err);
     }
   }
 
   // Fallback memoria
-  const paralelo = paralelosState.find((p: any) => p.id === cursoId) || paralelosState[0];
-  if (!paralelo) return res.status(404).json({ success: false, error: 'Paralelo no encontrado' });
+  const paralelo = paralelosState.find((p: any) => p.id === cursoId);
+  if (!paralelo) {
+    return res.json({
+      success: true,
+      paralelo: { id: '', nombre: '', grado: 8, jornada: 'Matutina', materia: '' },
+      fecha: fechaConsulta,
+      registroExistente: false,
+      asistenciaHoy: []
+    });
+  }
   const asistenciaHoy = paralelo.estudiantes.map((est: any) => ({
     estudianteId: est.id,
     nombre: est.nombre,
     numeroLista: est.numeroLista,
     cedula: est.cedula,
-    estado: 'P',
+    estado: '',
     justificada: false,
     motivo: '',
     faltasJustificadas: est.faltasJustificadas || 0,
@@ -1499,25 +1544,34 @@ app.get('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
     atrasos: est.atrasos || 0,
     porcentajeFaltas: 0
   }));
-  res.json({ success: true, paralelo, fecha: fechaHoy, asistenciaHoy });
+  res.json({ success: true, paralelo, fecha: fechaConsulta, registroExistente: false, asistenciaHoy });
 });
 
 // 2. POST /api/asistencia/:cursoId
 app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   const { cursoId } = req.params;
-  const { registros } = req.body;
+  const { registros, fecha } = req.body;
   const fechaHoy = new Date().toISOString().slice(0, 10);
+  const fechaRegistro =
+    typeof fecha === 'string' && fecha.trim() ? fecha.trim() : fechaHoy;
 
   await connectDB();
   if (isMongoConnected()) {
     try {
       await Asistencia.findOneAndUpdate(
-        { paraleloId: cursoId, fecha: fechaHoy },
-        { paraleloId: cursoId, fecha: fechaHoy, registros: registros || [] },
+        { paraleloId: cursoId, fecha: fechaRegistro },
+        { paraleloId: cursoId, fecha: fechaRegistro, registros: registros || [] },
         { upsert: true, new: true }
       );
-      await Paralelo.findByIdAndUpdate(cursoId, { asistenciaHoyRegistrada: true }).catch(() => {});
-      return res.json({ success: true, message: 'Asistencia guardada en MongoDB', paraleloId: cursoId, fecha: fechaHoy });
+      if (fechaRegistro === fechaHoy) {
+        await Paralelo.findByIdAndUpdate(cursoId, { asistenciaHoyRegistrada: true }).catch(() => {});
+      }
+      return res.json({
+        success: true,
+        message: 'Asistencia guardada en MongoDB',
+        paraleloId: cursoId,
+        fecha: fechaRegistro
+      });
     } catch (err) {
       console.warn('Error guardando asistencia en MongoDB:', err);
     }
@@ -1525,8 +1579,15 @@ app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
 
   // Fallback memoria
   const index = paralelosState.findIndex((p: any) => p.id === cursoId);
-  if (index !== -1) paralelosState[index].asistenciaHoyRegistrada = true;
-  res.json({ success: true, message: 'Asistencia guardada en memoria', paraleloId: cursoId, fecha: fechaHoy });
+  if (index !== -1 && fechaRegistro === fechaHoy) {
+    paralelosState[index].asistenciaHoyRegistrada = true;
+  }
+  res.json({
+    success: true,
+    message: 'Asistencia guardada en memoria',
+    paraleloId: cursoId,
+    fecha: fechaRegistro
+  });
 });
 
 // 3. GET /api/calificaciones/:cursoId
@@ -1536,78 +1597,127 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      let mongoParalelo = cursoId.match(/^[0-9a-fA-F]{24}$/) ? await Paralelo.findById(cursoId) : await Paralelo.findOne({ nombre: cursoId });
-      if (!mongoParalelo) mongoParalelo = await Paralelo.findOne();
+      const userPayload = getUserFromToken(req);
+      const docenteId = userPayload?.id ? String(userPayload.id) : null;
+      const isDocenteObjectId = docenteId && /^[a-f\d]{24}$/i.test(docenteId);
+      const docenteCondition = docenteId
+        ? isDocenteObjectId
+          ? { $or: [{ docenteId }, { docenteId: new mongoose.Types.ObjectId(docenteId) }] }
+          : { docenteId }
+        : {};
 
-      if (mongoParalelo) {
-        const paraleloIdStr = mongoParalelo._id.toString();
-        const alumnos = await Alumno.find({
-          $or: [{ paraleloId: mongoParalelo._id }, { paraleloId: paraleloIdStr }]
-        }).sort({ numeroLista: 1, nombre: 1 });
-        const actividadesMongo = await Actividad.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
-        const calificacionesMongo = await Calificacion.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
+      let mongoParalelo = null;
+      if (cursoId && cursoId !== 'default') {
+        if (/^[0-9a-fA-F]{24}$/.test(cursoId)) {
+          mongoParalelo = await Paralelo.findOne({ _id: cursoId, ...docenteCondition });
+        } else {
+          mongoParalelo = await Paralelo.findOne({ nombre: cursoId, ...docenteCondition });
+        }
+      }
+      if (!mongoParalelo && docenteId) {
+        mongoParalelo = await Paralelo.findOne(docenteCondition);
+      }
 
-        const actividades = actividadesMongo.map((a: any) => ({
-          id: a._id.toString(),
-          paraleloId: a.paraleloId,
-          titulo: a.titulo,
-          tipo: a.tipo,
-          fechaEntrega: a.fechaEntrega,
-          ponderacion: a.ponderacion,
-          entregadosCount: a.entregadosCount,
-          totalCount: a.totalCount,
-          estado: a.estado,
-          bloque: a.bloque,
-          descripcion: a.descripcion
-        }));
-
-        const libroNotas = alumnos.map((est: any) => {
-          const estId = est._id.toString();
-          const notasAlumno: Record<string, number> = {};
-          actividades.forEach((act: any) => {
-            const found = calificacionesMongo.find((c: any) => c.estudianteId === estId && c.actividadId === act.id);
-            if (found) {
-              notasAlumno[act.id] = found.nota;
-            }
-          });
-          const vals = Object.values(notasAlumno) as number[];
-          const prom = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 7.5;
-          return {
-            estudianteId: estId,
-            nombre: est.nombre,
-            numeroLista: est.numeroLista || 1,
-            cedula: est.cedula || '',
-            notas: notasAlumno,
-            promedio: Number(prom.toFixed(2))
-          };
-        });
-
-        const promediosTodos = libroNotas.map((n: any) => n.promedio);
-        const promedioGeneral = promediosTodos.length > 0 ? Number((promediosTodos.reduce((a, b) => a + b, 0) / promediosTodos.length).toFixed(2)) : 8.1;
-        const aprobados = promediosTodos.filter((p: number) => p >= 7.0).length;
-        const porcentajeAprobados = promediosTodos.length > 0 ? (aprobados / promediosTodos.length) * 100 : 90;
-
+      if (!mongoParalelo) {
         return res.json({
           success: true,
-          paralelo: { id: paraleloIdStr, nombre: mongoParalelo.nombre, grado: mongoParalelo.grado, materia: mongoParalelo.materia || 'General' },
-          actividades,
-          libroNotas,
-          estadisticas: { promedioGeneral, porcentajeAprobados, totalEstudiantes: libroNotas.length, enRiesgo: libroNotas.filter((n: any) => n.promedio < 7.0) }
+          paralelo: { id: '', nombre: '', grado: 8, materia: '' },
+          actividades: [],
+          libroNotas: [],
+          estadisticas: { promedioGeneral: 0, porcentajeAprobados: 0, totalEstudiantes: 0, enRiesgo: [] }
         });
       }
+
+      const paraleloIdStr = mongoParalelo._id.toString();
+      const alumnos = await Alumno.find({
+        $or: [{ paraleloId: mongoParalelo._id }, { paraleloId: paraleloIdStr }]
+      }).sort({ numeroLista: 1, nombre: 1 });
+      const actividadesMongo = await Actividad.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
+      const calificacionesMongo = await Calificacion.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
+
+      const actividades = actividadesMongo.map((a: any) => ({
+        id: a._id.toString(),
+        paraleloId: a.paraleloId,
+        titulo: a.titulo,
+        tipo: a.tipo,
+        fechaEntrega: a.fechaEntrega,
+        ponderacion: a.ponderacion,
+        entregadosCount: a.entregadosCount,
+        totalCount: a.totalCount,
+        estado: a.estado,
+        bloque: a.bloque,
+        descripcion: a.descripcion
+      }));
+
+      const libroNotas = alumnos.map((est: any, idx: number) => {
+        const estId = est._id.toString();
+        const notasAlumno: Record<string, number> = {};
+        actividades.forEach((act: any) => {
+          const found = calificacionesMongo.find((c: any) => c.estudianteId === estId && c.actividadId === act.id);
+          if (found) {
+            notasAlumno[act.id] = found.nota;
+          }
+        });
+        const vals = Object.values(notasAlumno) as number[];
+        const prom = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+        return {
+          estudianteId: estId,
+          nombre: est.nombre,
+          numeroLista: est.numeroLista || idx + 1,
+          cedula: est.cedula || '',
+          notas: notasAlumno,
+          promedio: Number(prom.toFixed(2))
+        };
+      });
+
+      const promediosConNota = libroNotas.map((n: any) => n.promedio).filter((p: number) => p > 0);
+      const promedioGeneral =
+        promediosConNota.length > 0
+          ? Number((promediosConNota.reduce((a, b) => a + b, 0) / promediosConNota.length).toFixed(2))
+          : 0;
+      const aprobados = promediosConNota.filter((p: number) => p >= 7.0).length;
+      const porcentajeAprobados =
+        promediosConNota.length > 0 ? Number(((aprobados / promediosConNota.length) * 100).toFixed(1)) : 0;
+
+      return res.json({
+        success: true,
+        paralelo: {
+          id: paraleloIdStr,
+          nombre: mongoParalelo.nombre,
+          grado: mongoParalelo.grado,
+          materia: mongoParalelo.materia || mongoParalelo.materias?.[0] || 'General'
+        },
+        actividades,
+        libroNotas,
+        estadisticas: {
+          promedioGeneral,
+          porcentajeAprobados,
+          totalEstudiantes: libroNotas.length,
+          enRiesgo: libroNotas.filter((n: any) => n.promedio > 0 && n.promedio < 7.0)
+        }
+      });
     } catch (err) {
       console.warn('Error leyendo calificaciones de MongoDB:', err);
     }
   }
 
   // Fallback memoria
-  const paralelo = paralelosState.find((p: any) => p.id === cursoId) || paralelosState[0];
+  const paralelo = paralelosState.find((p: any) => p.id === cursoId);
+  if (!paralelo) {
+    return res.json({
+      success: true,
+      paralelo: { id: '', nombre: '', grado: 8, materia: '' },
+      actividades: [],
+      libroNotas: [],
+      estadisticas: { promedioGeneral: 0, porcentajeAprobados: 0, totalEstudiantes: 0, enRiesgo: [] }
+    });
+  }
   const actividades = actividadesState.filter((a: any) => a.paraleloId === paralelo.id);
   const matrix = calificacionesMatrix[paralelo.id] || {};
   const libroNotas = paralelo.estudiantes.map((est: any) => {
     const notasAlumno: Record<string, number> = matrix[est.id] || {};
     const vals = Object.values(notasAlumno) as number[];
-    const prom = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 7.5;
+    const prom = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     return { estudianteId: est.id, nombre: est.nombre, numeroLista: est.numeroLista, cedula: est.cedula, notas: notasAlumno, promedio: Number(prom.toFixed(2)) };
   });
 
@@ -1616,7 +1726,7 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
     paralelo,
     actividades,
     libroNotas,
-    estadisticas: { promedioGeneral: 8.1, porcentajeAprobados: 90, totalEstudiantes: libroNotas.length, enRiesgo: [] }
+    estadisticas: { promedioGeneral: 0, porcentajeAprobados: 0, totalEstudiantes: libroNotas.length, enRiesgo: [] }
   });
 });
 

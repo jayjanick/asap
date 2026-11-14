@@ -59,6 +59,8 @@ export const CalificacionesPage: React.FC = () => {
   const [informeContenido, setInformeContenido] = useState<any | null>(null);
   const [generandoInforme, setGenerandoInforme] = useState(false);
 
+  const [paralelosLoaded, setParalelosLoaded] = useState(false);
+
   // 1. Cargar lista de paralelos del usuario desde MongoDB
   useEffect(() => {
     fetch(`${API_URL}/api/paralelos`, {
@@ -71,14 +73,23 @@ export const CalificacionesPage: React.FC = () => {
           if (!selectedCursoId) {
             setSelectedCursoId(d.paralelos[0].id);
           }
+        } else if (!cursoId) {
+          setData({ success: true, paralelos: [] });
+          setLoading(false);
         }
       })
-      .catch((e) => console.warn('Error cargando paralelos:', e));
+      .catch((e) => console.warn('Error cargando paralelos:', e))
+      .finally(() => setParalelosLoaded(true));
   }, [token]);
 
   // 2. Patrón de fetch para calificaciones del paralelo seleccionado
   useEffect(() => {
-    const endpointCursoId = selectedCursoId || cursoId || 'default';
+    const endpointCursoId = selectedCursoId || cursoId;
+    if (!endpointCursoId) {
+      if (paralelosLoaded) setLoading(false);
+      return;
+    }
+    setLoading(true);
     fetch(`${API_URL}/api/calificaciones/${endpointCursoId}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
@@ -114,7 +125,7 @@ export const CalificacionesPage: React.FC = () => {
         }
       })
       .finally(() => setLoading(false));
-  }, [selectedCursoId]);
+  }, [selectedCursoId, cursoId, paralelosLoaded, token]);
 
   // Cargar análisis del grupo si hay actividades y paralelo
   useEffect(() => {
@@ -190,14 +201,16 @@ export const CalificacionesPage: React.FC = () => {
     return Number((sum / validVals.length).toFixed(2));
   };
 
-  // Crear nueva columna con placeholder '-' (P3.4)
-  const handleCrearColumna = (e: React.FormEvent) => {
+  // Crear nueva columna con placeholder '-' y persistir en MongoDB (P3.4)
+  const handleCrearColumna = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevaTitulo.trim()) return;
 
+    const targetParaleloId = paralelo.id || selectedCursoId || cursoId || '';
+    const tempId = `act-${Date.now()}`;
     const nuevaAct: ActividadInfo = {
-      id: `act-${Date.now()}`,
-      paraleloId: paralelo.id,
+      id: tempId,
+      paraleloId: targetParaleloId,
       titulo: nuevaTitulo.trim(),
       tipo: nuevaTipo,
       fechaEntrega: new Date().toISOString().slice(0, 10),
@@ -208,7 +221,31 @@ export const CalificacionesPage: React.FC = () => {
       bloque: 2
     };
 
-    setActividades([...actividades, nuevaAct]);
+    try {
+      const res = await fetch(`${API_URL}/api/calificaciones/actividad`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          paraleloId: targetParaleloId,
+          titulo: nuevaTitulo.trim(),
+          tipo: nuevaTipo,
+          ponderacion: nuevaPonderacion
+        })
+      });
+      if (res.ok) {
+        const resData = await res.json();
+        if (resData?.actividad?.id) {
+          nuevaAct.id = resData.actividad.id;
+        }
+      }
+    } catch (err) {
+      console.warn('Error creando columna en MongoDB:', err);
+    }
+
+    setActividades((prev) => [...prev, nuevaAct]);
 
     // Asignar valor por defecto vacío/undefined (P3.4: placeholder '-')
     const updatedNotas = { ...notas };

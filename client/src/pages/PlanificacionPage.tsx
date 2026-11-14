@@ -105,10 +105,15 @@ export const PlanificacionPage: React.FC = () => {
 
   const handleGuardarPlan = async () => {
     if (!resultadoIA) return;
+    const bloqueNum = parseInt(String(bloque).replace(/\D/g, ''), 10) || 2;
+    const secuenciaNormalizada = (resultadoIA.secuenciaClases || []).map((sc: any) => ({
+      ...sc,
+      actividad: sc.actividad || sc.actividadSugerida || ''
+    }));
     const nuevoPlan: PlanificacionUnidad = {
       id: `plan-${Date.now()}`,
       materia,
-      bloque: 4,
+      bloque: bloqueNum,
       titulo: resultadoIA.tituloUnidad || 'Nueva Unidad con IA',
       destreza,
       semanas,
@@ -117,7 +122,7 @@ export const PlanificacionPage: React.FC = () => {
       generadaIA: true,
       objetivos: resultadoIA.objetivos || [],
       recursos: resultadoIA.recursos || [],
-      secuenciaClases: resultadoIA.secuenciaClases || []
+      secuenciaClases: secuenciaNormalizada
     };
 
     setPlanificaciones((prev) => [...prev, nuevoPlan]);
@@ -450,7 +455,7 @@ export const PlanificacionPage: React.FC = () => {
                     </span>
                     <p className="text-slate-500 mt-1">{sc.contenido}</p>
                     <span className="text-emerald-600 font-semibold block mt-1">
-                      Actividad: {sc.actividad}
+                      Actividad: {sc.actividad || (sc as any).actividadSugerida}
                     </span>
                   </div>
                 ))}

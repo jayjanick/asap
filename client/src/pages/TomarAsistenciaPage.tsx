@@ -21,7 +21,7 @@ import {
 
 interface RegistroEstado {
   estudianteId: string;
-  estado: 'P' | 'A' | 'F';
+  estado: '' | 'P' | 'A' | 'F';
   justificada: boolean;
   motivo: string;
 }
@@ -47,7 +47,7 @@ export const TomarAsistenciaPage: React.FC = () => {
   const [registros, setRegistros] = useState<Record<string, RegistroEstado>>({});
 
   useEffect(() => {
-    fetch(`${API_URL}/api/asistencia/${cursoId}`, {
+    fetch(`${API_URL}/api/asistencia/${cursoId}?fecha=${encodeURIComponent(fecha)}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then((r) => r.json())
@@ -77,7 +77,7 @@ export const TomarAsistenciaPage: React.FC = () => {
           d.asistenciaHoy.forEach((a: any) => {
             initReg[a.estudianteId] = {
               estudianteId: a.estudianteId,
-              estado: a.estado || 'P',
+              estado: a.estado || '',
               justificada: Boolean(a.justificada),
               motivo: a.motivo || ''
             };
@@ -86,7 +86,7 @@ export const TomarAsistenciaPage: React.FC = () => {
         }
       })
       .finally(() => setLoading(false));
-  }, [cursoId]);
+  }, [cursoId, fecha, token]);
 
   const handleEstadoChange = (estId: string, estado: 'P' | 'A' | 'F') => {
     setRegistros((prev) => ({
@@ -137,12 +137,15 @@ export const TomarAsistenciaPage: React.FC = () => {
   const handleGuardar = async () => {
     setGuardando(true);
     try {
-      await fetch(`${API_URL}/api/asistencia/${paralelo.id}`, {
+      await fetch(`${API_URL}/api/asistencia/${paralelo.id || cursoId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           fecha,
-          registros: Object.values(registros)
+          registros: Object.values(registros).filter((r) => r.estado !== '')
         })
       });
     } catch (e) {
@@ -324,7 +327,7 @@ export const TomarAsistenciaPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {estudiantes.map((est) => {
-                      const reg = registros[est.id] || { estado: 'P', justificada: false, motivo: '' };
+                      const reg = registros[est.id] || { estudianteId: est.id, estado: '', justificada: false, motivo: '' };
 
                       return (
                         <tr
@@ -414,7 +417,11 @@ export const TomarAsistenciaPage: React.FC = () => {
                               </div>
                             ) : (
                               <span className="text-slate-400 text-[11px]">
-                                {reg.estado === 'A' ? 'Atraso en jornada matutina' : 'Asistencia normal'}
+                                {reg.estado === 'A'
+                                  ? 'Atraso en jornada matutina'
+                                  : reg.estado === 'P'
+                                  ? 'Asistencia normal'
+                                  : 'Pendiente de marcar'}
                               </span>
                             )}
                           </td>
