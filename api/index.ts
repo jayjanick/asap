@@ -39,7 +39,8 @@ const NOMBRES_ESTUDIANTES_9NO = [
 
 function crearEstudiantes(nombres: string[], paraleloId: string) {
   return nombres.map((nombre, index) => {
-    const cedula = `09${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const prefix = paraleloId.includes('9no') ? '092' : '091';
+    const cedula = `${prefix}${String(index + 1).padStart(7, '0')}`;
     const faltasInjust = index === 3 || index === 17 ? 2 : index === 8 ? 1 : 0;
     const faltasJust = index === 4 || index === 21 ? 1 : 0;
     const atrasos = index % 5 === 0 ? 1 : 0;
@@ -57,7 +58,7 @@ function crearEstudiantes(nombres: string[], paraleloId: string) {
       cedula,
       numeroLista: index + 1,
       activo: true,
-      telefonoRepresentante: `+593 99 ${Math.floor(1000000 + Math.random() * 9000000)}`,
+      telefonoRepresentante: `+593 99 ${String(1000000 + (index + 1) * 12345).slice(0, 7)}`,
       asistenciaMes: Math.round(porcentaje),
       faltasJustificadas: faltasJust,
       faltasInjustificadas: faltasInjust,
@@ -331,6 +332,16 @@ const UsuarioSchema = new Schema(
     institucion: { type: String, required: true },
     telefono: { type: String },
     avatar: { type: String },
+    horarioSemanal: [
+      {
+        hora: { type: String },
+        lunes: { type: String, default: '' },
+        martes: { type: String, default: '' },
+        miercoles: { type: String, default: '' },
+        jueves: { type: String, default: '' },
+        viernes: { type: String, default: '' }
+      }
+    ]
   },
   { timestamps: true }
 );
@@ -553,7 +564,10 @@ export async function seedDatabase(force = false) {
         };
 
         await Alumno.findOneAndUpdate(
-          { cedula: est.cedula },
+          {
+            nombre: est.nombre,
+            paraleloId: { $in: [paraleloDoc._id, paraleloDoc._id.toString()] }
+          },
           force ? alumnoData : { $setOnInsert: alumnoData },
           { upsert: true }
         );
@@ -981,6 +995,122 @@ async function resolveDocenteParaleloFilter(req: Request, includeInactive = fals
   return { filter, userPayload, primaryDocenteId: String(primaryId) };
 }
 
+async function deduplicateAlumnosForParalelo(paraleloDoc: any) {
+  if (!paraleloDoc || !paraleloDoc._id) return [];
+  const rawAlumnos = await Alumno.find({
+    $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
+    activo: { $ne: false }
+  }).sort({ numeroLista: 1, createdAt: 1, _id: 1 });
+
+  const seenNames = new Map<string, any>();
+  const duplicateIds: any[] = [];
+  const uniqueAlumnos: any[] = [];
+
+  for (const al of rawAlumnos) {
+    const key = String(al.nombre || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!key) continue;
+    if (seenNames.has(key)) {
+      duplicateIds.push(al._id);
+    } else {
+      seenNames.set(key, al);
+      uniqueAlumnos.push(al);
+    }
+  }
+
+  if (duplicateIds.length > 0) {
+    await Alumno.deleteMany({ _id: { $in: duplicateIds } }).catch(() => {});
+  }
+
+  uniqueAlumnos.sort((a, b) =>
+    String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es')
+  );
+
+  let needsResequence = duplicateIds.length > 0;
+  uniqueAlumnos.forEach((al, idx) => {
+    if (al.numeroLista !== idx + 1) {
+      needsResequence = true;
+    }
+  });
+
+  if (needsResequence) {
+    await Promise.all(
+      uniqueAlumnos.map((al, idx) => {
+        al.numeroLista = idx + 1;
+        return Alumno.updateOne({ _id: al._id }, { $set: { numeroLista: idx + 1 } }).catch(() => {});
+      })
+    );
+  }
+
+  return uniqueAlumnos;
+}
+
+function buildDefaultHorarioFromParalelos(paralelos: any[]) {
+  const formatCursoLabel = (p: any) => {
+    if (!p) return '';
+    const nombre = String(p.nombre || '').trim();
+    const materia = String(p.materia || p.materias?.[0] || '').trim();
+    if (!materia || nombre.toLowerCase().includes(materia.toLowerCase())) {
+      return nombre;
+    }
+    return `${nombre} · ${materia}`;
+  };
+
+  const c0 = paralelos[0] ? formatCursoLabel(paralelos[0]) : '';
+  const c1 = paralelos[1] ? formatCursoLabel(paralelos[1]) : c0;
+  const c2 = paralelos[2] ? formatCursoLabel(paralelos[2]) : '';
+
+  return [
+    {
+      hora: '07:15 - 08:00',
+      lunes: c0,
+      martes: c1,
+      miercoles: c0,
+      jueves: c1,
+      viernes: c0
+    },
+    {
+      hora: '08:00 - 08:45',
+      lunes: c0,
+      martes: c1,
+      miercoles: c0,
+      jueves: c1,
+      viernes: c2 || c0
+    },
+    {
+      hora: '08:45 - 09:30',
+      lunes: c2 || 'Planificación Curricular',
+      martes: c1,
+      miercoles: c2 || 'Atención a Representantes',
+      jueves: c1,
+      viernes: 'Tutoría / Refuerzo Académico'
+    },
+    {
+      hora: '09:30 - 10:00',
+      lunes: 'RECESO',
+      martes: 'RECESO',
+      miercoles: 'RECESO',
+      jueves: 'RECESO',
+      viernes: 'RECESO'
+    },
+    {
+      hora: '10:00 - 10:45',
+      lunes: c1 || c0,
+      martes: c0,
+      miercoles: c1 || c0,
+      jueves: c2 || 'Gestión Pedagógica',
+      viernes: c1 || c0
+    },
+    {
+      hora: '10:45 - 11:30',
+      lunes: 'Calificación y Registro',
+      martes: c0,
+      miercoles: 'Refuerzo Académico (PRAI)',
+      jueves: 'Comisión Técnico-Pedagógica',
+      viernes: 'Cierre Semanal de Asistencia'
+    }
+  ];
+}
+
 export async function requireAdmin(req: Request, res: Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -1305,13 +1435,12 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
           };
         }
 
-        const paraleloObjectIds = misParalelos.map((p: any) => p._id);
         const paraleloIds = misParalelos.map((p: any) => p._id.toString());
         if (paraleloIds.length > 0) {
-          totalEstudiantes = await Alumno.countDocuments({
-            paraleloId: { $in: [...paraleloObjectIds, ...paraleloIds] },
-            activo: { $ne: false }
-          });
+          const cleanLists = await Promise.all(
+            misParalelos.map((p: any) => deduplicateAlumnosForParalelo(p))
+          );
+          totalEstudiantes = cleanLists.reduce((acc, list) => acc + list.length, 0);
           actividadesPendientes = await Actividad.countDocuments({
             paraleloId: { $in: paraleloIds },
             estado: 'Por calificar'
@@ -1414,10 +1543,7 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
       const paralelos = await Paralelo.find(auth.filter).sort({ createdAt: -1 });
       const paralelosWithCount = await Promise.all(
         paralelos.map(async (p: any) => {
-          const count = await Alumno.countDocuments({
-            $or: [{ paraleloId: p._id }, { paraleloId: p._id.toString() }],
-            activo: { $ne: false }
-          });
+          const cleanAlumnos = await deduplicateAlumnosForParalelo(p);
           return {
             id: p._id.toString(),
             nombre: p.nombre,
@@ -1429,7 +1555,7 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
             horario: p.horario || '07:15 - 08:45',
             aula: p.aula || 'Aula 101',
             activo: p.activo !== false,
-            totalEstudiantes: count,
+            totalEstudiantes: cleanAlumnos.length,
             asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
             porcentajeAsistenciaMes: 100
           };
@@ -1655,10 +1781,7 @@ app.get('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
     }
 
-    const alumnos = await Alumno.find({
-      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
-      activo: { $ne: false }
-    }).sort({ numeroLista: 1, nombre: 1 });
+    const alumnos = await deduplicateAlumnosForParalelo(paraleloDoc);
 
     return res.json({
       success: true,
@@ -1695,42 +1818,74 @@ app.post('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
     }
 
-    const existingCount = await Alumno.countDocuments({
-      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
-      activo: { $ne: false }
-    });
+    const existingAlumnos = await deduplicateAlumnosForParalelo(paraleloDoc);
 
-    const { nombre, cedula, telefonoRepresentante, estudiantes } = req.body;
+    const { nombre, cedula, telefonoRepresentante, estudiantes, actualizarDuplicados } = req.body;
     const rawList = Array.isArray(estudiantes)
       ? estudiantes
       : nombre
       ? [{ nombre, cedula, telefonoRepresentante }]
       : [];
 
-    const validToInsert = rawList
+    const validIncoming = rawList
       .filter((item: any) => item && typeof item.nombre === 'string' && item.nombre.trim())
-      .map((item: any, idx: number) => ({
+      .map((item: any) => ({
         nombre: item.nombre.trim(),
         cedula: item.cedula ? String(item.cedula).trim() : '',
-        numeroLista: existingCount + idx + 1,
-        paraleloId: paraleloDoc._id,
-        activo: true,
         telefonoRepresentante: item.telefonoRepresentante ? String(item.telefonoRepresentante).trim() : ''
       }));
 
-    if (validToInsert.length === 0) {
+    if (validIncoming.length === 0) {
       return res.status(400).json({ success: false, error: 'Debe proporcionar al menos un estudiante con nombre válido' });
     }
 
-    await Alumno.insertMany(validToInsert);
+    let nextNumeroLista = existingAlumnos.length + 1;
+    const toInsert: any[] = [];
+    let actualizadosCount = 0;
+    let omitidosCount = 0;
 
-    const alumnos = await Alumno.find({
-      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
-      activo: { $ne: false }
-    }).sort({ numeroLista: 1, nombre: 1 });
+    for (const item of validIncoming) {
+      const normName = item.nombre.toLowerCase().replace(/\s+/g, ' ');
+      const normCedula = item.cedula;
+      const existingMatch = existingAlumnos.find((ex: any) => {
+        const exName = String(ex.nombre || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const exCedula = String(ex.cedula || '').trim();
+        return exName === normName || (normCedula && exCedula && exCedula === normCedula);
+      });
+
+      if (existingMatch) {
+        if (actualizarDuplicados === true) {
+          const updateFields: any = { nombre: item.nombre };
+          if (item.cedula) updateFields.cedula = item.cedula;
+          if (item.telefonoRepresentante) updateFields.telefonoRepresentante = item.telefonoRepresentante;
+          await Alumno.updateOne({ _id: existingMatch._id }, { $set: updateFields });
+          actualizadosCount++;
+        } else {
+          omitidosCount++;
+        }
+      } else {
+        toInsert.push({
+          nombre: item.nombre,
+          cedula: item.cedula,
+          numeroLista: nextNumeroLista++,
+          paraleloId: paraleloDoc._id,
+          activo: true,
+          telefonoRepresentante: item.telefonoRepresentante
+        });
+      }
+    }
+
+    if (toInsert.length > 0) {
+      await Alumno.insertMany(toInsert);
+    }
+
+    const alumnos = await deduplicateAlumnosForParalelo(paraleloDoc);
 
     return res.status(201).json({
       success: true,
+      insertadosCount: toInsert.length,
+      actualizadosCount,
+      omitidosCount,
       alumnos: alumnos.map((a: any, idx: number) => ({
         id: a._id.toString(),
         nombre: a.nombre,
@@ -1808,10 +1963,7 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
       const paralelos = await Paralelo.find(auth.filter).sort({ createdAt: -1 });
       const paralelosWithCount = await Promise.all(
         paralelos.map(async (p: any) => {
-          const count = await Alumno.countDocuments({
-            $or: [{ paraleloId: p._id }, { paraleloId: p._id.toString() }],
-            activo: { $ne: false }
-          });
+          const cleanAlumnos = await deduplicateAlumnosForParalelo(p);
           return {
             id: p._id.toString(),
             nombre: p.nombre,
@@ -1822,7 +1974,7 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
             materia: p.materia || p.materias?.[0] || 'General',
             horario: p.horario || '07:15 - 08:45',
             aula: p.aula || 'Aula 101',
-            totalEstudiantes: count,
+            totalEstudiantes: cleanAlumnos.length,
             asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
             porcentajeAsistenciaMes: 100
           };
@@ -1837,6 +1989,111 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
     }
   }
   res.json({ success: true, paralelos: [] });
+});
+
+app.get('/api/horario', async (req: Request, res: Response) => {
+  await connectDB();
+  if (isMongoConnected()) {
+    try {
+      const auth = await resolveDocenteParaleloFilter(req, false);
+      if (!auth) {
+        return res.status(401).json({ success: false, error: 'No autenticado' });
+      }
+      const userPayload = auth.userPayload;
+      const misParalelos = await Paralelo.find(auth.filter).sort({ grado: 1, createdAt: 1 });
+      const regenerar = req.query.regenerar === 'true';
+
+      const dbUser =
+        (userPayload?.id && /^[a-f\d]{24}$/i.test(String(userPayload.id))
+          ? await Usuario.findById(userPayload.id)
+          : null) ||
+        (userPayload?.email ? await Usuario.findOne({ email: userPayload.email.toLowerCase().trim() }) : null);
+
+      let horario =
+        !regenerar && dbUser && Array.isArray((dbUser as any).horarioSemanal) && (dbUser as any).horarioSemanal.length > 0
+          ? (dbUser as any).horarioSemanal.map((h: any) => ({
+              hora: h.hora || '',
+              lunes: h.lunes || '',
+              martes: h.martes || '',
+              miercoles: h.miercoles || '',
+              jueves: h.jueves || '',
+              viernes: h.viernes || ''
+            }))
+          : buildDefaultHorarioFromParalelos(misParalelos);
+
+      if (dbUser && (regenerar || !Array.isArray((dbUser as any).horarioSemanal) || (dbUser as any).horarioSemanal.length === 0)) {
+        (dbUser as any).horarioSemanal = horario;
+        await dbUser.save().catch(() => {});
+      }
+
+      return res.json({
+        success: true,
+        horario,
+        cursos: misParalelos.map((p: any) => ({
+          id: p._id.toString(),
+          nombre: p.nombre,
+          materia: p.materia || p.materias?.[0] || 'General',
+          horario: p.horario || '07:15 - 08:45',
+          aula: p.aula || 'Aula 101'
+        }))
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message || 'Error al obtener horario' });
+    }
+  }
+  return res.json({
+    success: true,
+    horario: buildDefaultHorarioFromParalelos(PARALELOS_INICIALES),
+    cursos: PARALELOS_INICIALES.map((p) => ({
+      id: p.id,
+      nombre: p.nombre,
+      materia: p.materia,
+      horario: p.horario,
+      aula: p.aula
+    }))
+  });
+});
+
+app.put('/api/horario', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, false);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+    const userPayload = auth.userPayload;
+    const rawHorario = Array.isArray(req.body?.horario) ? req.body.horario : [];
+    const sanitizedHorario = rawHorario.map((row: any) => ({
+      hora: String(row?.hora || '').trim(),
+      lunes: String(row?.lunes || '').trim(),
+      martes: String(row?.martes || '').trim(),
+      miercoles: String(row?.miercoles || '').trim(),
+      jueves: String(row?.jueves || '').trim(),
+      viernes: String(row?.viernes || '').trim()
+    }));
+
+    const dbUser =
+      (userPayload?.id && /^[a-f\d]{24}$/i.test(String(userPayload.id))
+        ? await Usuario.findById(userPayload.id)
+        : null) ||
+      (userPayload?.email ? await Usuario.findOne({ email: userPayload.email.toLowerCase().trim() }) : null);
+
+    if (dbUser) {
+      (dbUser as any).horarioSemanal = sanitizedHorario;
+      await dbUser.save();
+    }
+
+    return res.json({
+      success: true,
+      horario: sanitizedHorario,
+      message: 'Horario semanal guardado en MongoDB'
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message || 'Error al guardar horario' });
+  }
 });
 
 // ==========================================
@@ -1889,10 +2146,7 @@ app.get('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
       }
 
       const paraleloIdStr = paraleloDoc._id.toString();
-      const alumnos = await Alumno.find({
-        $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloIdStr }],
-        activo: { $ne: false }
-      }).sort({ numeroLista: 1, nombre: 1 });
+      const alumnos = await deduplicateAlumnosForParalelo(paraleloDoc);
       const asistenciaDoc = await Asistencia.findOne({
         $or: [{ paraleloId: paraleloIdStr }, { paraleloId: cursoId }],
         fecha: fechaConsulta
@@ -2053,10 +2307,7 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
       }
 
       const paraleloIdStr = mongoParalelo._id.toString();
-      const alumnos = await Alumno.find({
-        $or: [{ paraleloId: mongoParalelo._id }, { paraleloId: paraleloIdStr }],
-        activo: { $ne: false }
-      }).sort({ numeroLista: 1, nombre: 1 });
+      const alumnos = await deduplicateAlumnosForParalelo(mongoParalelo);
       const actividadesMongo = await Actividad.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
       const calificacionesMongo = await Calificacion.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
 

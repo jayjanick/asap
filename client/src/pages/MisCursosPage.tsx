@@ -81,6 +81,11 @@ export const MisCursosPage: React.FC = () => {
   const [nuevoAlumnoCedula, setNuevoAlumnoCedula] = useState('');
   const [agregandoAlumno, setAgregandoAlumno] = useState(false);
   const [importandoArchivo, setImportandoArchivo] = useState(false);
+  const [pendingDuplicateStudents, setPendingDuplicateStudents] = useState<{
+    incomingList: Array<{ nombre: string; cedula: string }>;
+    duplicates: Array<{ nombre: string; cedula: string }>;
+    isManual: boolean;
+  } | null>(null);
 
   const showToast = (tipo: 'ok' | 'err', texto: string) => {
     setFeedbackMsg({ tipo, texto });
@@ -375,7 +380,9 @@ export const MisCursosPage: React.FC = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        setAlumnos(Array.isArray(data?.alumnos) ? data.alumnos : []);
+        const lista = Array.isArray(data?.alumnos) ? data.alumnos : [];
+        setAlumnos(lista);
+        syncCursoCount(curso.id, lista.length);
       }
     } catch {
       showToast('err', 'Error cargando nómina de estudiantes.');
@@ -391,10 +398,27 @@ export const MisCursosPage: React.FC = () => {
     setCursoNomina((prev) => (prev && prev.id === cursoId ? { ...prev, totalEstudiantes: newCount } : prev));
   };
 
-  const handleAgregarAlumnoManual = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cursoNomina || !nuevoAlumnoNombre.trim()) return;
-    setAgregandoAlumno(true);
+  const detectDuplicates = (incomingList: Array<{ nombre: string; cedula: string }>) => {
+    return incomingList.filter((item) => {
+      const normName = item.nombre.trim().toLowerCase().replace(/\s+/g, ' ');
+      const normCed = item.cedula.trim();
+      return alumnos.some((ex) => {
+        const exName = ex.nombre.trim().toLowerCase().replace(/\s+/g, ' ');
+        const exCed = (ex.cedula || '').trim();
+        return exName === normName || (normCed && exCed && exCed === normCed);
+      });
+    });
+  };
+
+  const enviarAlumnosAlServidor = async (
+    incomingList: Array<{ nombre: string; cedula: string }>,
+    actualizarDuplicados: boolean,
+    isManual: boolean
+  ) => {
+    if (!cursoNomina) return;
+    if (isManual) setAgregandoAlumno(true);
+    else setImportandoArchivo(true);
+
     try {
       const res = await fetch(`${API_URL}/api/paralelos/${cursoNomina.id}/alumnos`, {
         method: 'POST',
@@ -403,57 +427,65 @@ export const MisCursosPage: React.FC = () => {
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          nombre: nuevoAlumnoNombre.trim(),
-          cedula: nuevoAlumnoCedula.trim()
+          estudiantes: incomingList,
+          actualizarDuplicados
         })
       });
       const data = await res.json();
       if (res.ok && data?.success && Array.isArray(data.alumnos)) {
         setAlumnos(data.alumnos);
         syncCursoCount(cursoNomina.id, data.alumnos.length);
-        setNuevoAlumnoNombre('');
-        setNuevoAlumnoCedula('');
-        showToast('ok', 'Estudiante agregado a la nómina.');
+        if (isManual) {
+          setNuevoAlumnoNombre('');
+          setNuevoAlumnoCedula('');
+        }
+        const partes: string[] = [];
+        if (data.insertadosCount > 0) partes.push(`${data.insertadosCount} nuevos agregados`);
+        if (data.actualizadosCount > 0) partes.push(`${data.actualizadosCount} actualizados`);
+        if (data.omitidosCount > 0) partes.push(`${data.omitidosCount} repetidos omitidos`);
+        showToast('ok', partes.length > 0 ? `Nómina actualizada (${partes.join(', ')}).` : 'Nómina actualizada.');
       } else {
-        showToast('err', data?.error || 'Error agregando estudiante.');
+        showToast('err', data?.error || 'Error procesando estudiantes.');
       }
     } catch {
-      showToast('err', 'Error de conexión al agregar estudiante.');
+      showToast('err', 'Error de conexión al guardar estudiantes.');
     } finally {
       setAgregandoAlumno(false);
+      setImportandoArchivo(false);
+      setPendingDuplicateStudents(null);
     }
+  };
+
+  const handleAgregarAlumnoManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cursoNomina || !nuevoAlumnoNombre.trim()) return;
+    const incoming = [{ nombre: nuevoAlumnoNombre.trim(), cedula: nuevoAlumnoCedula.trim() }];
+    const duplicates = detectDuplicates(incoming);
+    if (duplicates.length > 0) {
+      setPendingDuplicateStudents({ incomingList: incoming, duplicates, isManual: true });
+      return;
+    }
+    await enviarAlumnosAlServidor(incoming, false, true);
   };
 
   const handleImportarAlumnosEnDrawer = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !cursoNomina) return;
-    setImportandoArchivo(true);
     try {
       const parsed = await parseStudentsFromFile(file);
+      e.target.value = '';
       if (parsed.length === 0) {
         showToast('err', 'No se encontraron nombres válidos en el archivo.');
         return;
       }
-      const res = await fetch(`${API_URL}/api/paralelos/${cursoNomina.id}/alumnos`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ estudiantes: parsed })
-      });
-      const data = await res.json();
-      if (res.ok && data?.success && Array.isArray(data.alumnos)) {
-        setAlumnos(data.alumnos);
-        syncCursoCount(cursoNomina.id, data.alumnos.length);
-        showToast('ok', `Se importaron ${parsed.length} estudiantes correctamente.`);
-      } else {
-        showToast('err', data?.error || 'Error al importar estudiantes.');
+      const duplicates = detectDuplicates(parsed);
+      if (duplicates.length > 0) {
+        setPendingDuplicateStudents({ incomingList: parsed, duplicates, isManual: false });
+        return;
       }
+      await enviarAlumnosAlServidor(parsed, false, false);
     } catch {
       showToast('err', 'No se pudo procesar el archivo Excel/CSV.');
-    } finally {
-      setImportandoArchivo(false);
       e.target.value = '';
     }
   };
@@ -984,6 +1016,84 @@ export const MisCursosPage: React.FC = () => {
             )}
           </div>
         </Drawer>
+      )}
+
+      {/* MODAL CONFIRMAR ACTUALIZACIÓN U OMISIÓN DE ESTUDIANTES REPETIDOS */}
+      {pendingDuplicateStudents && (
+        <Modal
+          isOpen={Boolean(pendingDuplicateStudents)}
+          onClose={() => setPendingDuplicateStudents(null)}
+          title="Estudiantes ya registrados en este curso"
+          subtitle="Se detectaron coincidencias con la nómina actual del paralelo."
+        >
+          <div className="space-y-4 text-xs text-left py-1">
+            <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+              Se encontraron{' '}
+              <strong className="text-slate-900 dark:text-white">
+                {pendingDuplicateStudents.duplicates.length} estudiante(s)
+              </strong>{' '}
+              que ya forman parte de este curso. ¿Deseas actualizar sus datos (como cédula o nombre) o prefieres omitir los repetidos y agregar únicamente los nuevos?
+            </p>
+
+            <div className="max-h-36 overflow-y-auto p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-1">
+              <span className="font-bold text-amber-800 dark:text-amber-300 block mb-1">
+                Coincidencias detectadas:
+              </span>
+              {pendingDuplicateStudents.duplicates.slice(0, 10).map((dup, i) => (
+                <div key={i} className="text-amber-900 dark:text-amber-200 flex justify-between">
+                  <span className="font-medium truncate">{dup.nombre}</span>
+                  <span className="font-mono text-[11px] opacity-80">{dup.cedula || 'Sin cédula'}</span>
+                </div>
+              ))}
+              {pendingDuplicateStudents.duplicates.length > 10 && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400 italic pt-1">
+                  ...y {pendingDuplicateStudents.duplicates.length - 10} estudiante(s) más.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPendingDuplicateStudents(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                isLoading={agregandoAlumno || importandoArchivo}
+                onClick={() =>
+                  enviarAlumnosAlServidor(
+                    pendingDuplicateStudents.incomingList,
+                    false,
+                    pendingDuplicateStudents.isManual
+                  )
+                }
+              >
+                Omitir repetidos
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                isLoading={agregandoAlumno || importandoArchivo}
+                onClick={() =>
+                  enviarAlumnosAlServidor(
+                    pendingDuplicateStudents.incomingList,
+                    true,
+                    pendingDuplicateStudents.isManual
+                  )
+                }
+              >
+                Actualizar datos de repetidos
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

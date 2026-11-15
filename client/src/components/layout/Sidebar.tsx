@@ -7,13 +7,11 @@ import {
   GraduationCap,
   Briefcase,
   Settings,
-  HelpCircle,
   ExternalLink,
   ChevronLeft,
   ChevronRight,
   LogOut,
   X,
-  Zap,
   BookOpen
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -42,8 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { name: 'Planificación', path: '/planificacion', icon: BookOpenCheck },
     { name: 'Calificaciones', path: '/calificaciones', icon: GraduationCap },
     { name: 'Workspace', path: '/workspace', icon: Briefcase },
-    { name: 'Perfil & Ajustes', path: '/perfil', icon: Settings },
-    { name: 'Soporte', path: '/perfil', icon: HelpCircle }
+    { name: 'Perfil & Ajustes', path: '/perfil', icon: Settings }
   ];
 
   const handleLogout = () => {
