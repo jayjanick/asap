@@ -340,12 +340,17 @@ const ParaleloSchema = new Schema(
   {
     nombre: { type: String, required: true },
     grado: { type: Number, required: true },
+    paralelo: { type: String, default: 'A' },
+    materia: { type: String, default: 'General' },
     jornada: { type: String, enum: ['Matutina', 'Vespertina', 'Nocturna'], default: 'Matutina' },
-    docenteId: { type: String, required: true },
+    docenteId: { type: Schema.Types.Mixed, required: true },
     materias: [{ type: String }],
     nivel: { type: String, default: 'Educación Básica Superior' },
     especialidad: { type: String },
-    asistenciaHoyRegistrada: { type: Boolean, default: false }
+    horario: { type: String, default: '07:15 - 08:45' },
+    aula: { type: String, default: 'Aula 101' },
+    asistenciaHoyRegistrada: { type: Boolean, default: false },
+    activo: { type: Boolean, default: true }
   },
   { timestamps: true }
 );
@@ -355,10 +360,14 @@ const AlumnoSchema = new Schema(
   {
     nombre: { type: String, required: true },
     cedula: { type: String, required: false },
-    paraleloId: { type: Schema.Types.ObjectId, ref: 'Paralelo', required: true },
+    numeroLista: { type: Number },
+    paraleloId: { type: Schema.Types.Mixed, required: true },
     activo: { type: Boolean, default: true },
     contactoRepresentante: { type: String },
     telefonoRepresentante: { type: String },
+    faltasJustificadas: { type: Number, default: 0 },
+    faltasInjustificadas: { type: Number, default: 0 },
+    atrasos: { type: Number, default: 0 },
     observaciones: [{ type: String }],
   },
   { timestamps: true }
@@ -922,6 +931,56 @@ function getUserFromToken(req: Request) {
   }
 }
 
+async function resolveDocenteParaleloFilter(req: Request, includeInactive = false) {
+  const userPayload = getUserFromToken(req);
+  const rawId = userPayload?.id ? String(userPayload.id) : null;
+  const email = (userPayload?.email || '').toLowerCase().trim();
+  if (!rawId && !email) return null;
+
+  const idCandidates: any[] = [];
+  const addCandidate = (val: any) => {
+    if (!val) return;
+    const str = String(val);
+    if (!idCandidates.some((c) => typeof c === 'string' && c === str)) {
+      idCandidates.push(str);
+    }
+    if (/^[a-f\d]{24}$/i.test(str)) {
+      if (!idCandidates.some((c) => c instanceof mongoose.Types.ObjectId && c.toString() === str)) {
+        idCandidates.push(new mongoose.Types.ObjectId(str));
+      }
+    }
+  };
+
+  if (rawId) addCandidate(rawId);
+
+  if (email && isMongoConnected()) {
+    try {
+      const dbUser = await Usuario.findOne({ email }).select('_id').lean();
+      if (dbUser && (dbUser as any)._id) {
+        addCandidate((dbUser as any)._id.toString());
+      }
+    } catch {}
+  }
+
+  if (email === 'andres.morales@uefdemocracia.edu.ec') {
+    addCandidate('docente-1');
+  }
+
+  if (idCandidates.length === 0) return null;
+
+  const filter: any = {
+    docenteId: { $in: idCandidates }
+  };
+  if (!includeInactive) {
+    filter.activo = { $ne: false };
+  }
+  const primaryId =
+    idCandidates.find((c) => typeof c === 'string' && /^[a-f\d]{24}$/i.test(c)) ||
+    String(idCandidates[0]);
+
+  return { filter, userPayload, primaryDocenteId: String(primaryId) };
+}
+
 export async function requireAdmin(req: Request, res: Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -1162,17 +1221,32 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     const createdParalelos: any[] = [];
     if (Array.isArray(cursos)) {
       for (const curso of cursos) {
-        const paraleloNombre = `${curso.grado || 'Curso'} "${curso.paralelo || 'A'}" - ${curso.materia || 'General'}`;
+        const gradoStr = String(curso.grado || '8vo EGB').trim();
+        const paraleloLetra = String(curso.paralelo || 'A').trim();
+        const materiaStr = String(curso.materia || 'General').trim();
+        const paraleloNombre = `${gradoStr} "${paraleloLetra}" - ${materiaStr}`;
         const ests = (estudiantesPorCurso && estudiantesPorCurso[curso.id]) || [];
         const mongoParalelo = await Paralelo.create({
           nombre: paraleloNombre,
-          grado: parseInt(curso.grado) || 8,
+          grado: parseInt(gradoStr, 10) || 8,
+          paralelo: paraleloLetra,
+          materia: materiaStr,
+          nivel: curso.nivel || 'Educación Básica Superior',
           jornada: 'Matutina',
           docenteId: createdUser._id.toString(),
-          materias: [curso.materia || 'General']
+          materias: [materiaStr],
+          activo: true
         });
         if (Array.isArray(ests) && ests.length > 0) {
-          await Alumno.insertMany(ests.map((e: any) => ({ nombre: e.nombre, cedula: e.cedula || '', paraleloId: mongoParalelo._id, activo: true })));
+          await Alumno.insertMany(
+            ests.map((e: any, idx: number) => ({
+              nombre: e.nombre,
+              cedula: e.cedula || '',
+              numeroLista: e.lista || idx + 1,
+              paraleloId: mongoParalelo._id,
+              activo: true
+            }))
+          );
         }
         createdParalelos.push({ id: mongoParalelo._id.toString(), nombre: paraleloNombre });
       }
@@ -1197,7 +1271,8 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const userPayload = getUserFromToken(req);
+      const auth = await resolveDocenteParaleloFilter(req, false);
+      const userPayload = auth?.userPayload || getUserFromToken(req);
       const docenteId = userPayload?.id;
 
       let docenteObj: any = { ...DOCENTE_ACTUAL };
@@ -1207,17 +1282,12 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
       let misParalelos: any[] = [];
       let asistenciaMes = 95.0;
 
-      if (docenteId) {
-        const docenteIdStr = String(docenteId);
-        const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
-        const query = isObjectId
-          ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] }
-          : { docenteId: docenteIdStr };
-
-        misParalelos = await Paralelo.find(query);
+      if (auth) {
+        misParalelos = await Paralelo.find(auth.filter);
         paralelosNombres = misParalelos.map((p: any) => p.nombre);
 
-        const dbUser = await Usuario.findById(docenteId) || await Usuario.findOne({ email: userPayload?.email });
+        const dbUser = (docenteId && /^[a-f\d]{24}$/i.test(String(docenteId)) ? await Usuario.findById(docenteId) : null) ||
+          (userPayload?.email ? await Usuario.findOne({ email: userPayload.email }) : null);
         if (dbUser) {
           docenteObj = {
             id: dbUser._id.toString(),
@@ -1235,9 +1305,13 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
           };
         }
 
+        const paraleloObjectIds = misParalelos.map((p: any) => p._id);
         const paraleloIds = misParalelos.map((p: any) => p._id.toString());
         if (paraleloIds.length > 0) {
-          totalEstudiantes = await Alumno.countDocuments({ paraleloId: { $in: paraleloIds } });
+          totalEstudiantes = await Alumno.countDocuments({
+            paraleloId: { $in: [...paraleloObjectIds, ...paraleloIds] },
+            activo: { $ne: false }
+          });
           actividadesPendientes = await Actividad.countDocuments({
             paraleloId: { $in: paraleloIds },
             estado: 'Por calificar'
@@ -1262,9 +1336,9 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
           claseActual = {
             paralelo: primerParalelo.nombre,
             materia: primerParalelo.materia || primerParalelo.materias?.[0] || 'General',
-            aula: 'Bloque B · Aula 204',
-            horario: '07:15 a 08:45',
-            tema: 'Ensayo argumentativo'
+            aula: primerParalelo.aula || 'Bloque B · Aula 204',
+            horario: primerParalelo.horario || '07:15 a 08:45',
+            tema: 'Sesión curricular activa'
           };
         }
       }
@@ -1333,29 +1407,28 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const userPayload = getUserFromToken(req);
-      const docenteId = userPayload?.id;
-      if (!docenteId) return res.json({ success: true, paralelos: [] });
-      const docenteIdStr = String(docenteId);
-      const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
-      const query = isObjectId
-        ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] }
-        : { docenteId: docenteIdStr };
-      const paralelos = await Paralelo.find(query);
+      const includeInactive = req.query.incluirInactivos === 'true';
+      const auth = await resolveDocenteParaleloFilter(req, includeInactive);
+      if (!auth) return res.json({ success: true, paralelos: [] });
+
+      const paralelos = await Paralelo.find(auth.filter).sort({ createdAt: -1 });
       const paralelosWithCount = await Promise.all(
         paralelos.map(async (p: any) => {
           const count = await Alumno.countDocuments({
-            $or: [{ paraleloId: p._id }, { paraleloId: p._id.toString() }]
+            $or: [{ paraleloId: p._id }, { paraleloId: p._id.toString() }],
+            activo: { $ne: false }
           });
           return {
             id: p._id.toString(),
             nombre: p.nombre,
             grado: p.grado,
+            paralelo: p.paralelo || 'A',
             nivel: p.nivel || 'Educación Básica Superior',
             jornada: p.jornada || 'Matutina',
             materia: p.materia || p.materias?.[0] || 'General',
             horario: p.horario || '07:15 - 08:45',
             aula: p.aula || 'Aula 101',
+            activo: p.activo !== false,
             totalEstudiantes: count,
             asistenciaHoyRegistrada: Boolean(p.asistenciaHoyRegistrada),
             porcentajeAsistenciaMes: 100
@@ -1366,47 +1439,384 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
         success: true,
         paralelos: paralelosWithCount
       });
-    } catch (e) {}
+    } catch (e: any) {
+      console.warn('Error en GET /api/paralelos:', e);
+      return res.json({ success: true, paralelos: [] });
+    }
   }
-  res.json({
-    success: true,
-    paralelos: paralelosState.map((p: any) => ({
-      id: p.id,
-      nombre: p.nombre,
-      grado: p.grado,
-      jornada: p.jornada,
-      materia: p.materia,
-      totalEstudiantes: p.totalEstudiantes,
-      asistenciaHoyRegistrada: p.asistenciaHoyRegistrada,
-      porcentajeAsistenciaMes: p.porcentajeAsistenciaMes,
-      aula: p.aula,
-      horario: p.horario
-    }))
-  });
+  res.json({ success: true, paralelos: [] });
+});
+
+app.post('/api/paralelos', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, true);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+
+    const { nombre, grado, paralelo, materia, nivel, jornada, horario, aula, estudiantes } = req.body;
+    const gradoStr = String(grado || '8vo EGB').trim();
+    const paraleloLetra = String(paralelo || 'A').trim();
+    const materiaStr = String(materia || 'General').trim();
+    if (!materiaStr) {
+      return res.status(400).json({ success: false, error: 'La materia es obligatoria' });
+    }
+
+    const nombreFinal =
+      typeof nombre === 'string' && nombre.trim()
+        ? nombre.trim()
+        : `${gradoStr} "${paraleloLetra}" - ${materiaStr}`;
+
+    const nuevoParalelo = await Paralelo.create({
+      nombre: nombreFinal,
+      grado: parseInt(gradoStr.replace(/\D/g, ''), 10) || 8,
+      paralelo: paraleloLetra,
+      materia: materiaStr,
+      materias: [materiaStr],
+      nivel: nivel || 'Educación Básica Superior',
+      jornada: jornada || 'Matutina',
+      horario: horario || '07:15 - 08:45',
+      aula: aula || 'Aula 101',
+      docenteId: auth.primaryDocenteId,
+      asistenciaHoyRegistrada: false,
+      activo: true
+    });
+
+    let totalInsertados = 0;
+    if (Array.isArray(estudiantes) && estudiantes.length > 0) {
+      const validEsts = estudiantes
+        .filter((e: any) => e && typeof e.nombre === 'string' && e.nombre.trim())
+        .map((e: any, idx: number) => ({
+          nombre: e.nombre.trim(),
+          cedula: e.cedula ? String(e.cedula).trim() : '',
+          numeroLista: idx + 1,
+          paraleloId: nuevoParalelo._id,
+          activo: true,
+          telefonoRepresentante: e.telefonoRepresentante ? String(e.telefonoRepresentante).trim() : ''
+        }));
+      if (validEsts.length > 0) {
+        await Alumno.insertMany(validEsts);
+        totalInsertados = validEsts.length;
+      }
+    }
+
+    if (/^[a-f\d]{24}$/i.test(auth.primaryDocenteId)) {
+      await Usuario.updateOne(
+        { _id: auth.primaryDocenteId },
+        { $addToSet: { materias: materiaStr } }
+      ).catch(() => {});
+    }
+
+    return res.status(201).json({
+      success: true,
+      paralelo: {
+        id: nuevoParalelo._id.toString(),
+        nombre: nuevoParalelo.nombre,
+        grado: nuevoParalelo.grado,
+        paralelo: nuevoParalelo.paralelo || paraleloLetra,
+        nivel: nuevoParalelo.nivel,
+        jornada: nuevoParalelo.jornada,
+        materia: nuevoParalelo.materia,
+        horario: nuevoParalelo.horario,
+        aula: nuevoParalelo.aula,
+        activo: true,
+        totalEstudiantes: totalInsertados,
+        asistenciaHoyRegistrada: false,
+        porcentajeAsistenciaMes: 100
+      }
+    });
+  } catch (e: any) {
+    recordAdminError(req, 500, e.message || 'Error creando paralelo');
+    return res.status(500).json({ success: false, error: e.message || 'Error al crear el curso' });
+  }
+});
+
+app.put('/api/paralelos/:id', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, true);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+    const { id } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      return res.status(400).json({ success: false, error: 'ID de paralelo inválido' });
+    }
+
+    const existing = await Paralelo.findOne({ _id: id, ...auth.filter });
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
+    }
+
+    const { nombre, grado, paralelo, materia, nivel, jornada, horario, aula, activo } = req.body;
+    if (typeof nombre === 'string' && nombre.trim()) existing.nombre = nombre.trim();
+    if (grado !== undefined) existing.grado = parseInt(String(grado).replace(/\D/g, ''), 10) || existing.grado;
+    if (typeof paralelo === 'string' && paralelo.trim()) existing.paralelo = paralelo.trim();
+    if (typeof materia === 'string' && materia.trim()) {
+      existing.materia = materia.trim();
+      existing.materias = [materia.trim()];
+    }
+    if (typeof nivel === 'string' && nivel.trim()) existing.nivel = nivel.trim();
+    if (typeof jornada === 'string' && ['Matutina', 'Vespertina', 'Nocturna'].includes(jornada)) {
+      existing.jornada = jornada;
+    }
+    if (typeof horario === 'string') existing.horario = horario.trim();
+    if (typeof aula === 'string') existing.aula = aula.trim();
+    if (typeof activo === 'boolean') existing.activo = activo;
+
+    await existing.save();
+
+    const count = await Alumno.countDocuments({
+      $or: [{ paraleloId: existing._id }, { paraleloId: existing._id.toString() }],
+      activo: { $ne: false }
+    });
+
+    return res.json({
+      success: true,
+      paralelo: {
+        id: existing._id.toString(),
+        nombre: existing.nombre,
+        grado: existing.grado,
+        paralelo: existing.paralelo || 'A',
+        nivel: existing.nivel || 'Educación Básica Superior',
+        jornada: existing.jornada || 'Matutina',
+        materia: existing.materia || existing.materias?.[0] || 'General',
+        horario: existing.horario || '07:15 - 08:45',
+        aula: existing.aula || 'Aula 101',
+        activo: existing.activo !== false,
+        totalEstudiantes: count,
+        asistenciaHoyRegistrada: Boolean(existing.asistenciaHoyRegistrada),
+        porcentajeAsistenciaMes: 100
+      }
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message || 'Error actualizando el curso' });
+  }
+});
+
+app.delete('/api/paralelos/:id', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, true);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+    const { id } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      return res.status(400).json({ success: false, error: 'ID de paralelo inválido' });
+    }
+
+    const updated = await Paralelo.findOneAndUpdate(
+      { _id: id, ...auth.filter },
+      { $set: { activo: false } },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
+    }
+
+    return res.json({
+      success: true,
+      id,
+      message: 'Curso desactivado correctamente. Su historial de asistencias y calificaciones se mantiene intacto.'
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message || 'Error al desactivar el curso' });
+  }
+});
+
+app.get('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, true);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+    const { id } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      return res.status(400).json({ success: false, error: 'ID de paralelo inválido' });
+    }
+
+    const paraleloDoc = await Paralelo.findOne({ _id: id, ...auth.filter });
+    if (!paraleloDoc) {
+      return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
+    }
+
+    const alumnos = await Alumno.find({
+      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
+      activo: { $ne: false }
+    }).sort({ numeroLista: 1, nombre: 1 });
+
+    return res.json({
+      success: true,
+      alumnos: alumnos.map((a: any, idx: number) => ({
+        id: a._id.toString(),
+        nombre: a.nombre,
+        cedula: a.cedula || '',
+        numeroLista: a.numeroLista || idx + 1,
+        telefonoRepresentante: a.telefonoRepresentante || ''
+      }))
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message || 'Error cargando estudiantes' });
+  }
+});
+
+app.post('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, true);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+    const { id } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      return res.status(400).json({ success: false, error: 'ID de paralelo inválido' });
+    }
+
+    const paraleloDoc = await Paralelo.findOne({ _id: id, ...auth.filter });
+    if (!paraleloDoc) {
+      return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
+    }
+
+    const existingCount = await Alumno.countDocuments({
+      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
+      activo: { $ne: false }
+    });
+
+    const { nombre, cedula, telefonoRepresentante, estudiantes } = req.body;
+    const rawList = Array.isArray(estudiantes)
+      ? estudiantes
+      : nombre
+      ? [{ nombre, cedula, telefonoRepresentante }]
+      : [];
+
+    const validToInsert = rawList
+      .filter((item: any) => item && typeof item.nombre === 'string' && item.nombre.trim())
+      .map((item: any, idx: number) => ({
+        nombre: item.nombre.trim(),
+        cedula: item.cedula ? String(item.cedula).trim() : '',
+        numeroLista: existingCount + idx + 1,
+        paraleloId: paraleloDoc._id,
+        activo: true,
+        telefonoRepresentante: item.telefonoRepresentante ? String(item.telefonoRepresentante).trim() : ''
+      }));
+
+    if (validToInsert.length === 0) {
+      return res.status(400).json({ success: false, error: 'Debe proporcionar al menos un estudiante con nombre válido' });
+    }
+
+    await Alumno.insertMany(validToInsert);
+
+    const alumnos = await Alumno.find({
+      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
+      activo: { $ne: false }
+    }).sort({ numeroLista: 1, nombre: 1 });
+
+    return res.status(201).json({
+      success: true,
+      alumnos: alumnos.map((a: any, idx: number) => ({
+        id: a._id.toString(),
+        nombre: a.nombre,
+        cedula: a.cedula || '',
+        numeroLista: a.numeroLista || idx + 1,
+        telefonoRepresentante: a.telefonoRepresentante || ''
+      }))
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message || 'Error agregando estudiantes' });
+  }
+});
+
+app.delete('/api/paralelos/:id/alumnos/:alumnoId', async (req: Request, res: Response) => {
+  await connectDB();
+  if (!isMongoConnected()) {
+    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+  }
+  try {
+    const auth = await resolveDocenteParaleloFilter(req, true);
+    if (!auth) {
+      return res.status(401).json({ success: false, error: 'No autenticado' });
+    }
+    const { id, alumnoId } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(id) || !/^[a-f\d]{24}$/i.test(alumnoId)) {
+      return res.status(400).json({ success: false, error: 'ID inválido' });
+    }
+
+    const paraleloDoc = await Paralelo.findOne({ _id: id, ...auth.filter });
+    if (!paraleloDoc) {
+      return res.status(404).json({ success: false, error: 'Curso no encontrado o sin permisos' });
+    }
+
+    await Alumno.findOneAndUpdate(
+      {
+        _id: alumnoId,
+        $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }]
+      },
+      { $set: { activo: false } }
+    );
+
+    const remaining = await Alumno.find({
+      $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloDoc._id.toString() }],
+      activo: { $ne: false }
+    }).sort({ numeroLista: 1, nombre: 1 });
+
+    await Promise.all(
+      remaining.map((a: any, idx: number) =>
+        Alumno.updateOne({ _id: a._id }, { $set: { numeroLista: idx + 1 } })
+      )
+    );
+
+    return res.json({
+      success: true,
+      alumnos: remaining.map((a: any, idx: number) => ({
+        id: a._id.toString(),
+        nombre: a.nombre,
+        cedula: a.cedula || '',
+        numeroLista: idx + 1,
+        telefonoRepresentante: a.telefonoRepresentante || ''
+      }))
+    });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e.message || 'Error eliminando estudiante' });
+  }
 });
 
 app.get('/api/asistencia', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const userPayload = getUserFromToken(req);
-      const docenteId = userPayload?.id;
-      if (!docenteId) return res.json({ success: true, paralelos: [] });
-      const docenteIdStr = String(docenteId);
-      const isObjectId = /^[a-f\d]{24}$/i.test(docenteIdStr);
-      const query = isObjectId
-        ? { $or: [{ docenteId: docenteIdStr }, { docenteId: new mongoose.Types.ObjectId(docenteIdStr) }] }
-        : { docenteId: docenteIdStr };
-      const paralelos = await Paralelo.find(query);
+      const auth = await resolveDocenteParaleloFilter(req, false);
+      if (!auth) return res.json({ success: true, paralelos: [] });
+
+      const paralelos = await Paralelo.find(auth.filter).sort({ createdAt: -1 });
       const paralelosWithCount = await Promise.all(
         paralelos.map(async (p: any) => {
           const count = await Alumno.countDocuments({
-            $or: [{ paraleloId: p._id }, { paraleloId: p._id.toString() }]
+            $or: [{ paraleloId: p._id }, { paraleloId: p._id.toString() }],
+            activo: { $ne: false }
           });
           return {
             id: p._id.toString(),
             nombre: p.nombre,
             grado: p.grado,
+            paralelo: p.paralelo || 'A',
             nivel: p.nivel || 'Educación Básica Superior',
             jornada: p.jornada || 'Matutina',
             materia: p.materia || p.materias?.[0] || 'General',
@@ -1422,9 +1832,11 @@ app.get('/api/asistencia', async (req: Request, res: Response) => {
         success: true,
         paralelos: paralelosWithCount
       });
-    } catch (e) {}
+    } catch (e) {
+      return res.json({ success: true, paralelos: [] });
+    }
   }
-  res.json({ success: true, paralelos: paralelosState });
+  res.json({ success: true, paralelos: [] });
 });
 
 // ==========================================
@@ -1443,25 +1855,27 @@ app.get('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const userPayload = getUserFromToken(req);
-      const docenteId = userPayload?.id ? String(userPayload.id) : null;
-      const isDocenteObjectId = docenteId && /^[a-f\d]{24}$/i.test(docenteId);
-      const docenteCondition = docenteId
-        ? isDocenteObjectId
-          ? { $or: [{ docenteId }, { docenteId: new mongoose.Types.ObjectId(docenteId) }] }
-          : { docenteId }
-        : {};
+      const auth = await resolveDocenteParaleloFilter(req, false);
+      if (!auth) {
+        return res.json({
+          success: true,
+          paralelo: { id: '', nombre: '', grado: 8, jornada: 'Matutina', materia: '' },
+          fecha: fechaConsulta,
+          registroExistente: false,
+          asistenciaHoy: []
+        });
+      }
 
       let paraleloDoc = null;
       if (cursoId && cursoId !== 'default') {
         if (/^[0-9a-fA-F]{24}$/.test(cursoId)) {
-          paraleloDoc = await Paralelo.findOne({ _id: cursoId, ...docenteCondition });
+          paraleloDoc = await Paralelo.findOne({ _id: cursoId, ...auth.filter });
         } else {
-          paraleloDoc = await Paralelo.findOne({ nombre: cursoId, ...docenteCondition });
+          paraleloDoc = await Paralelo.findOne({ nombre: cursoId, ...auth.filter });
         }
       }
-      if (!paraleloDoc && docenteId) {
-        paraleloDoc = await Paralelo.findOne(docenteCondition);
+      if (!paraleloDoc) {
+        paraleloDoc = await Paralelo.findOne(auth.filter);
       }
 
       if (!paraleloDoc) {
@@ -1476,7 +1890,8 @@ app.get('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
 
       const paraleloIdStr = paraleloDoc._id.toString();
       const alumnos = await Alumno.find({
-        $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloIdStr }]
+        $or: [{ paraleloId: paraleloDoc._id }, { paraleloId: paraleloIdStr }],
+        activo: { $ne: false }
       }).sort({ numeroLista: 1, nombre: 1 });
       const asistenciaDoc = await Asistencia.findOne({
         $or: [{ paraleloId: paraleloIdStr }, { paraleloId: cursoId }],
@@ -1558,6 +1973,13 @@ app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
+      const auth = await resolveDocenteParaleloFilter(req, false);
+      if (auth && /^[0-9a-fA-F]{24}$/.test(cursoId)) {
+        const owns = await Paralelo.findOne({ _id: cursoId, ...auth.filter });
+        if (!owns) {
+          return res.status(403).json({ success: false, error: 'No tienes permiso para modificar este curso' });
+        }
+      }
       await Asistencia.findOneAndUpdate(
         { paraleloId: cursoId, fecha: fechaRegistro },
         { paraleloId: cursoId, fecha: fechaRegistro, registros: registros || [] },
@@ -1597,25 +2019,27 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const userPayload = getUserFromToken(req);
-      const docenteId = userPayload?.id ? String(userPayload.id) : null;
-      const isDocenteObjectId = docenteId && /^[a-f\d]{24}$/i.test(docenteId);
-      const docenteCondition = docenteId
-        ? isDocenteObjectId
-          ? { $or: [{ docenteId }, { docenteId: new mongoose.Types.ObjectId(docenteId) }] }
-          : { docenteId }
-        : {};
+      const auth = await resolveDocenteParaleloFilter(req, false);
+      if (!auth) {
+        return res.json({
+          success: true,
+          paralelo: { id: '', nombre: '', grado: 8, materia: '' },
+          actividades: [],
+          libroNotas: [],
+          estadisticas: { promedioGeneral: 0, porcentajeAprobados: 0, totalEstudiantes: 0, enRiesgo: [] }
+        });
+      }
 
       let mongoParalelo = null;
       if (cursoId && cursoId !== 'default') {
         if (/^[0-9a-fA-F]{24}$/.test(cursoId)) {
-          mongoParalelo = await Paralelo.findOne({ _id: cursoId, ...docenteCondition });
+          mongoParalelo = await Paralelo.findOne({ _id: cursoId, ...auth.filter });
         } else {
-          mongoParalelo = await Paralelo.findOne({ nombre: cursoId, ...docenteCondition });
+          mongoParalelo = await Paralelo.findOne({ nombre: cursoId, ...auth.filter });
         }
       }
-      if (!mongoParalelo && docenteId) {
-        mongoParalelo = await Paralelo.findOne(docenteCondition);
+      if (!mongoParalelo) {
+        mongoParalelo = await Paralelo.findOne(auth.filter);
       }
 
       if (!mongoParalelo) {
@@ -1630,7 +2054,8 @@ app.get('/api/calificaciones/:cursoId', async (req: Request, res: Response) => {
 
       const paraleloIdStr = mongoParalelo._id.toString();
       const alumnos = await Alumno.find({
-        $or: [{ paraleloId: mongoParalelo._id }, { paraleloId: paraleloIdStr }]
+        $or: [{ paraleloId: mongoParalelo._id }, { paraleloId: paraleloIdStr }],
+        activo: { $ne: false }
       }).sort({ numeroLista: 1, nombre: 1 });
       const actividadesMongo = await Actividad.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });
       const calificacionesMongo = await Calificacion.find({ paraleloId: { $in: [paraleloIdStr, cursoId] } });

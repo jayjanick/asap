@@ -479,20 +479,29 @@ export const CalificacionesPage: React.FC = () => {
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-2">
             Paralelo:
           </span>
-          <div className="flex gap-1.5 flex-1 flex-wrap">
-            {paralelosList.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedCursoId(p.id)}
-                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedCursoId === p.id
-                    ? 'bg-[#176087] text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
+          <div className="flex gap-1.5 flex-1 flex-wrap items-center">
+            {paralelosList.length === 0 ? (
+              <Link
+                to="/cursos"
+                className="text-xs font-bold text-[#176087] dark:text-[#9ED8ED] hover:underline pl-1"
               >
-                {p.nombre}
-              </button>
-            ))}
+                + Crear o gestionar cursos en Mis Cursos →
+              </Link>
+            ) : (
+              paralelosList.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedCursoId(p.id)}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedCursoId === p.id
+                      ? 'bg-[#176087] text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  {p.nombre}
+                </button>
+              ))
+            )}
           </div>
         </div>
 

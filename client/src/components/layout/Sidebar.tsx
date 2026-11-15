@@ -13,7 +13,8 @@ import {
   ChevronRight,
   LogOut,
   X,
-  Zap
+  Zap,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -36,6 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems = [
     { name: 'Panel Diario', path: '/dashboard', icon: LayoutDashboard },
+    { name: 'Mis Cursos', path: '/cursos', icon: BookOpen },
     { name: 'Asistencia', path: '/asistencia', icon: UserCheck },
     { name: 'Planificación', path: '/planificacion', icon: BookOpenCheck },
     { name: 'Calificaciones', path: '/calificaciones', icon: GraduationCap },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import type { ParaleloInfo } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
@@ -9,11 +9,13 @@ import {
   CheckCircle2,
   AlertTriangle,
   ArrowRight,
-  Clock
+  Clock,
+  BookOpen
 } from 'lucide-react';
 
 export const AsistenciaPage: React.FC = () => {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -24,7 +26,7 @@ export const AsistenciaPage: React.FC = () => {
       .then((r) => r.json())
       .then((d) => setData(d))
       .finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   if (loading) return <Skeleton className="h-96 w-full" />;
   if (!data) return <EmptyState mensaje="No hay datos aún" />;
@@ -44,13 +46,22 @@ export const AsistenciaPage: React.FC = () => {
             <InfoTooltip content="Control diario de asistencia y registro de ausentismo conforme a la normativa MINEDUC y RGLOEI." />
           </div>
         </div>
+
+        <Link to="/cursos">
+          <Button variant="outline" size="sm" className="text-xs">
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Gestionar Mis Cursos</span>
+          </Button>
+        </Link>
       </div>
 
       {/* Paralelos Cards Grid */}
       {paralelos.length === 0 ? (
         <EmptyState
-          mensaje="Aún no tienes paralelos asignados"
-          submensaje="Los cursos y paralelos asignados a tu carga horaria aparecerán aquí para registrar asistencia diaria."
+          mensaje="Aún no tienes paralelos activos"
+          submensaje="Crea tus cursos e importa o agrega tu lista de estudiantes desde la sección Mis Cursos para comenzar a tomar asistencia."
+          accionTexto="Ir a Mis Cursos"
+          onAccion={() => navigate('/cursos')}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

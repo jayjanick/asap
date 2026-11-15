@@ -14,6 +14,7 @@ import CalendarioPlanificacionPage from './pages/CalendarioPlanificacionPage';
 import CalificacionesPage from './pages/CalificacionesPage';
 import WorkspacePage from './pages/WorkspacePage';
 import PerfilPage from './pages/PerfilPage';
+import MisCursosPage from './pages/MisCursosPage';
 import AdminLoginPage from './pages/admin/AdminLoginPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUsuariosPage from './pages/admin/AdminUsuariosPage';
@@ -91,6 +92,7 @@ export const AppRoutes: React.FC = () => {
         }
       >
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/cursos" element={<MisCursosPage />} />
         <Route path="/asistencia" element={<AsistenciaPage />} />
         <Route path="/asistencia/:cursoId" element={<TomarAsistenciaPage />} />
         <Route path="/planificacion" element={<PlanificacionPage />} />
