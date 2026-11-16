@@ -628,7 +628,7 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
             Workspace Docente
           </h2>
-          <InfoTooltip content="Espacio de trabajo diario con tablero Kanban arrastrable, repositorio de documentos clasificados y plantillas oficiales MINEDUC." />
+          <InfoTooltip content="Espacio de trabajo diario con tablero Kanban arrastrable y repositorio de documentos clasificados." />
         </div>
 
         {/* Selector de pestañas local (P0.3: sin alterar la URL) */}
@@ -642,16 +642,6 @@ Se deja constancia del presente documento para el expediente de vicerrectorado.
             }`}
           >
             Tablero Kanban
-          </button>
-          <button
-            onClick={() => setActiveTab('plantillas')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-              activeTab === 'plantillas'
-                ? 'bg-white dark:bg-[#0A2239] text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            Plantillas MINEDUC
           </button>
           <button
             onClick={() => setActiveTab('documentos')}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
+import { Card, Button, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import {
   Calendar as CalendarIcon,
@@ -10,69 +10,171 @@ import {
   ChevronRight,
   ArrowLeft,
   Clock,
-  ExternalLink
+  CheckCircle2
 } from 'lucide-react';
 
 interface EventoClase {
+  fechaISO: string;
   dia: number;
   hora: string;
   paralelo: string;
   materia: string;
   tema: string;
+  contenido: string;
   destreza: string;
   actividad: string;
+  completada: boolean;
   color: string;
 }
 
+const MESES_NOMBRES = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre'
+];
+
+const DIA_NOMBRE_A_NUM: Record<string, number> = {
+  Lunes: 1,
+  Martes: 2,
+  Miércoles: 3,
+  Miercoles: 3,
+  Jueves: 4,
+  Viernes: 5
+};
+
 export const CalendarioPlanificacionPage: React.FC = () => {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
+  const [cursos, setCursos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [viewMode, setViewMode] = useState<'mes' | 'semana' | 'dia'>('mes');
+  const now = new Date();
+  const [currentYear, setCurrentYear] = useState(now.getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(now.getMonth()); // 0-11
   const [selectedParalelo, setSelectedParalelo] = useState<string>('todos');
   const [selectedEvento, setSelectedEvento] = useState<EventoClase | null>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/planificacion`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((r) => r.json())
-      .then((d) => setData(d))
+    Promise.all([
+      fetch(`${API_URL}/api/planificacion`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then((r) => r.json()),
+      fetch(`${API_URL}/api/paralelos`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then((r) => (r.ok ? r.json() : { paralelos: [] }))
+        .catch(() => ({ paralelos: [] }))
+    ])
+      .then(([planData, parData]) => {
+        setData(planData);
+        if (Array.isArray(parData?.paralelos)) {
+          setCursos(parData.paralelos);
+        }
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   if (loading) return <Skeleton className="h-96 w-full" />;
   if (!data) return <EmptyState mensaje="No hay datos aún" />;
 
   const planificaciones = Array.isArray(data.planificaciones) ? data.planificaciones : [];
 
-  // Mapear secuencias de clases reales si existen en las planificaciones
-  const eventosClase: Record<number, EventoClase[]> = {};
+  const totalDiasMes = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const primerDiaSemanaOffset = new Date(currentYear, currentMonth, 1).getDay();
+
+  // Distribuir las clases de cada planificación según fechaInicio, fechaFin y diasImparticion
+  const eventosPorDia: Record<number, EventoClase[]> = {};
+
   planificaciones.forEach((plan: any, planIdx: number) => {
-    if (Array.isArray(plan.secuenciaClases)) {
-      plan.secuenciaClases.forEach((sc: any, scIdx: number) => {
-        // Asignar a un día representativo del mes
-        const diaCalculado = Math.min(28, (planIdx * 8) + (scIdx * 4) + 5);
-        if (!eventosClase[diaCalculado]) eventosClase[diaCalculado] = [];
-        eventosClase[diaCalculado].push({
-          dia: diaCalculado,
-          hora: '07:15 - 08:45',
-          paralelo: plan.paralelo || '8vo A',
-          materia: plan.materia || 'Lengua y Literatura',
-          tema: sc.tema || plan.titulo,
-          destreza: plan.destreza || '',
-          actividad: sc.actividad || sc.actividadSugerida || 'Clase regular',
-          color: planIdx % 2 === 0 ? 'bg-[#176087]' : 'bg-indigo-600'
-        });
-      });
+    const secuencias = Array.isArray(plan.secuenciaClases) ? plan.secuenciaClases : [];
+    if (secuencias.length === 0) return;
+
+    const diasConfigurados: number[] =
+      Array.isArray(plan.diasImparticion) && plan.diasImparticion.length > 0
+        ? plan.diasImparticion
+            .map((d: string) => DIA_NOMBRE_A_NUM[d])
+            .filter((n: number | undefined): n is number => typeof n === 'number')
+        : [1, 3, 5];
+
+    const startDate = plan.fechaInicio
+      ? new Date(`${plan.fechaInicio}T00:00:00`)
+      : new Date(currentYear, currentMonth, 1 + planIdx * 3);
+    const endDate = plan.fechaFin
+      ? new Date(`${plan.fechaFin}T23:59:59`)
+      : new Date(startDate.getTime() + (Number(plan.semanas) || 4) * 7 * 86400000);
+
+    // Generar fechas válidas que coincidan con los días de impartición
+    const validDates: Date[] = [];
+    const cursor = new Date(startDate);
+    let safety = 0;
+    while (cursor <= endDate && validDates.length < secuencias.length && safety < 180) {
+      if (diasConfigurados.includes(cursor.getDay())) {
+        validDates.push(new Date(cursor));
+      }
+      cursor.setDate(cursor.getDate() + 1);
+      safety++;
     }
+
+    secuencias.forEach((sc: any, scIdx: number) => {
+      const targetDate =
+        validDates[scIdx] ||
+        new Date(startDate.getTime() + scIdx * 2 * 86400000);
+      if (
+        targetDate.getFullYear() === currentYear &&
+        targetDate.getMonth() === currentMonth
+      ) {
+        const dayNum = targetDate.getDate();
+        if (!eventosPorDia[dayNum]) eventosPorDia[dayNum] = [];
+        eventosPorDia[dayNum].push({
+          fechaISO: targetDate.toISOString().slice(0, 10),
+          dia: dayNum,
+          hora: 'Sesión programada',
+          paralelo: plan.paralelo || plan.materia || 'Curso',
+          materia: plan.materia || 'General',
+          tema: sc.tema || plan.titulo,
+          contenido: sc.contenido || '',
+          destreza: plan.destreza || '',
+          actividad: sc.actividad || sc.actividadSugerida || 'Actividad de clase',
+          completada: Boolean(sc.completada),
+          color: sc.completada
+            ? 'bg-emerald-600'
+            : planIdx % 2 === 0
+            ? 'bg-[#176087]'
+            : 'bg-[#0A2239]'
+        });
+      }
+    });
   });
 
+  const handlePrevMonth = () => {
+    if (currentMonth === 0) {
+      setCurrentMonth(11);
+      setCurrentYear((y) => y - 1);
+    } else {
+      setCurrentMonth((m) => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (currentMonth === 11) {
+      setCurrentMonth(0);
+      setCurrentYear((y) => y + 1);
+    } else {
+      setCurrentMonth((m) => m + 1);
+    }
+  };
+
   const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-  const totalDiasMes = 31;
-  const primerDiaSemanaOffset = 4; // Octubre 2026
 
   return (
     <div className="space-y-6 text-left">
@@ -88,55 +190,28 @@ export const CalendarioPlanificacionPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <CalendarIcon className="w-6 h-6 text-[#176087] dark:text-[#9ED8ED]" />
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-                Calendario de Clases
+                Calendario de Planificación
               </h2>
-              <InfoTooltip content="Sincronizado con el cronograma del régimen Costa 2026 y fechas cívicas del Ministerio de Educación." />
+              <InfoTooltip content="Distribución mensual de tus sesiones según las fechas de inicio, fin y días configurados en cada unidad." />
             </div>
           </div>
         </div>
 
-        {/* Filters and View Switcher */}
+        {/* Filtro por curso */}
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={selectedParalelo}
             onChange={(e) => setSelectedParalelo(e.target.value)}
             className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0A2239] text-slate-900 dark:text-white"
           >
-            <option value="todos">Todos los paralelos</option>
-            <option value="8vo A">8vo EGB "A"</option>
-            <option value="9no B">9no EGB "B"</option>
-          </select>
-
-          <div className="flex rounded-lg bg-slate-200 dark:bg-slate-800 p-0.5 text-xs font-semibold">
-            {(['mes', 'semana', 'dia'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`px-3 py-1 rounded-md capitalize transition-all cursor-pointer ${
-                  viewMode === m
-                    ? 'bg-white dark:bg-[#0A2239] text-slate-900 dark:text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                {m}
-              </button>
+            <option value="todos">Todos mis cursos</option>
+            {cursos.map((c) => (
+              <option key={c.id} value={c.nombre}>
+                {c.nombre}
+              </option>
             ))}
-          </div>
+          </select>
         </div>
-      </div>
-
-      {/* Google Calendar Connected Banner */}
-      <div className="p-3.5 rounded-2xl bg-[#9ED8ED]/20 dark:bg-[#176087]/20 border border-[#176087]/20 dark:border-[#9ED8ED]/20 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2.5">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-semibold text-slate-800 dark:text-slate-200">
-            Google Calendar Sincronizado
-          </span>
-          <span className="text-slate-500 hidden sm:inline">· {user?.email || 'docente@educacion.gob.ec'}</span>
-        </div>
-        <Link to="/perfil" className="text-[#176087] dark:text-[#9ED8ED] font-bold hover:underline flex items-center gap-1">
-          Configurar sincronización <ExternalLink className="w-3 h-3" />
-        </Link>
       </div>
 
       {/* Mes Grid o Empty State */}
@@ -152,14 +227,28 @@ export const CalendarioPlanificacionPage: React.FC = () => {
           {/* Month Header Bar */}
           <div className="p-4 bg-[#0A2239] text-white flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-base font-bold">Octubre 2026</span>
-              <span className="text-xs text-[#9ED8ED] font-mono">1er Quimestre · Parcial 2</span>
+              <span className="text-base font-bold">
+                {MESES_NOMBRES[currentMonth]} {currentYear}
+              </span>
+              <span className="text-xs text-[#9ED8ED] font-mono">
+                {planificaciones.length} unidad(es) registrada(s)
+              </span>
             </div>
             <div className="flex items-center gap-1">
-              <button className="p-1.5 rounded hover:bg-slate-800 text-slate-300 cursor-pointer">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="p-1.5 rounded hover:bg-slate-800 text-slate-300 cursor-pointer"
+                title="Mes anterior"
+              >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <button className="p-1.5 rounded hover:bg-slate-800 text-slate-300 cursor-pointer">
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-1.5 rounded hover:bg-slate-800 text-slate-300 cursor-pointer"
+                title="Mes siguiente"
+              >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -174,20 +263,26 @@ export const CalendarioPlanificacionPage: React.FC = () => {
 
           {/* Calendar Grid cells */}
           <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 dark:divide-slate-800 min-h-[500px]">
-            {/* Empty cells before month start */}
             {Array.from({ length: primerDiaSemanaOffset }).map((_, i) => (
-              <div key={`empty-${i}`} className="p-2 bg-slate-50/50 dark:bg-[#071727]/30 min-h-[95px]" />
+              <div
+                key={`empty-${i}`}
+                className="p-2 bg-slate-50/50 dark:bg-[#071727]/30 min-h-[95px]"
+              />
             ))}
 
-            {/* Days */}
             {Array.from({ length: totalDiasMes }, (_, i) => {
               const dayNum = i + 1;
-              const clasesDia = eventosClase[dayNum] || [];
+              const clasesDia = eventosPorDia[dayNum] || [];
               const filteredClases =
                 selectedParalelo === 'todos'
                   ? clasesDia
-                  : clasesDia.filter((c) => c.paralelo.includes(selectedParalelo));
-              const isToday = dayNum === new Date().getDate();
+                  : clasesDia.filter((c) =>
+                      c.paralelo.toLowerCase().includes(selectedParalelo.toLowerCase())
+                    );
+              const isToday =
+                dayNum === now.getDate() &&
+                currentMonth === now.getMonth() &&
+                currentYear === now.getFullYear();
 
               return (
                 <div
@@ -220,9 +315,11 @@ export const CalendarioPlanificacionPage: React.FC = () => {
                     {filteredClases.map((c, idx) => (
                       <button
                         key={idx}
+                        type="button"
                         onClick={() => setSelectedEvento(c)}
                         className={`w-full text-left p-1 rounded text-[10px] text-white font-medium truncate block cursor-pointer transition-opacity hover:opacity-90 ${c.color}`}
                       >
+                        {c.completada ? '✓ ' : ''}
                         {c.paralelo}: {c.tema}
                       </button>
                     ))}
@@ -242,9 +339,24 @@ export const CalendarioPlanificacionPage: React.FC = () => {
           isOpen={Boolean(selectedEvento)}
           onClose={() => setSelectedEvento(null)}
           title={selectedEvento.tema}
-          subtitle={`${selectedEvento.paralelo} · ${selectedEvento.materia} · ${selectedEvento.hora}`}
+          subtitle={`${selectedEvento.paralelo} · ${selectedEvento.materia} · ${selectedEvento.fechaISO}`}
         >
           <div className="space-y-4 text-xs text-left">
+            {selectedEvento.completada && (
+              <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4" /> Sesión marcada como impartida
+              </div>
+            )}
+
+            {selectedEvento.contenido && (
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#071727] border border-slate-200 dark:border-slate-800">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Contenido de la Sesión
+                </span>
+                <p className="text-slate-700 dark:text-slate-200">{selectedEvento.contenido}</p>
+              </div>
+            )}
+
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#071727] border border-slate-200 dark:border-slate-800">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
                 Destreza Curricular
@@ -266,7 +378,7 @@ export const CalendarioPlanificacionPage: React.FC = () => {
             <div className="flex items-center justify-between text-slate-500 pt-2 border-t border-slate-100 dark:border-slate-800">
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-[#176087]" />
-                {selectedEvento.hora} (Hora Pedagógica)
+                Fecha: {selectedEvento.fechaISO}
               </span>
               <Button size="sm" variant="outline" onClick={() => setSelectedEvento(null)}>
                 Cerrar

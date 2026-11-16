@@ -469,12 +469,16 @@ const KanbanTask = mongoose.models.KanbanTask || mongoose.model('KanbanTask', Ka
 const PlanificacionSchema = new Schema(
   {
     docenteId: { type: String, default: 'docente-1' },
-    paraleloId: { type: String },
+    paraleloId: { type: String, default: '' },
+    paralelo: { type: String, default: '' },
     materia: { type: String, required: true },
     bloque: { type: Number, default: 2 },
     titulo: { type: String, required: true },
     destreza: { type: String, default: '' },
     semanas: { type: Number, default: 4 },
+    fechaInicio: { type: String, default: '' },
+    fechaFin: { type: String, default: '' },
+    diasImparticion: [{ type: String }],
     progreso: { type: Number, default: 0 },
     estado: { type: String, default: 'Por iniciar' },
     generadaIA: { type: Boolean, default: false },
@@ -486,12 +490,23 @@ const PlanificacionSchema = new Schema(
       tema: String,
       contenido: String,
       actividad: String,
-      actividadSugerida: String
+      actividadSugerida: String,
+      completada: { type: Boolean, default: false }
+    }],
+    archivosAdjuntos: [{
+      nombre: String,
+      tipo: String,
+      tamano: String,
+      contenidoBase64: String,
+      fecha: String
     }]
   },
   { timestamps: true }
 );
-const Planificacion = mongoose.models.Planificacion || mongoose.model('Planificacion', PlanificacionSchema);
+if (mongoose.models.Planificacion) {
+  delete mongoose.models.Planificacion;
+}
+const Planificacion = mongoose.model('Planificacion', PlanificacionSchema);
 
 const SesionSchema = new Schema(
   {
@@ -698,26 +713,57 @@ export async function analizarRendimientoGrupo(params: {
   materia: string;
   promedioGeneral: number;
   porcentajeAprobados: number;
-  estudiantesEnRiesgo: any[];
-  actividadesCriticas: any[];
+  estudiantesEnRiesgo: { nombre: string; promedio: number }[];
+  actividadesCriticas: { titulo: string; promedio: number }[];
 }) {
   const ai = getAiClient();
+  const riesgoTexto =
+    params.estudiantesEnRiesgo.length > 0
+      ? params.estudiantesEnRiesgo.map((e) => `${e.nombre} (${Number(e.promedio).toFixed(2)}/10)`).join(', ')
+      : 'Ninguno';
+  const actTexto =
+    params.actividadesCriticas.length > 0
+      ? params.actividadesCriticas.map((a) => `${a.titulo} (${Number(a.promedio).toFixed(2)}/10)`).join(', ')
+      : 'Sin actividades críticas';
+
   if (ai) {
     try {
-      const prompt = `Analiza el estado académico del paralelo "${params.paraleloNombre}" en "${params.materia}" (promedio ${params.promedioGeneral}). Responde en JSON con diagnosticoBreve, puntosAlerta, estrategiasRefuerzo, recomendacionDirectivo.`;
+      const prompt = `Actúa como asesor pedagógico MINEDUC. Analiza los datos reales del curso "${params.paraleloNombre}" en la asignatura "${params.materia}":
+- Promedio real del grupo: ${Number(params.promedioGeneral).toFixed(2)}/10
+- Porcentaje de aprobación (>=7.00): ${Number(params.porcentajeAprobados).toFixed(1)}%
+- Estudiantes en riesgo (<7.00): ${riesgoTexto}
+- Actividades con menor rendimiento: ${actTexto}
+Responde ÚNICAMENTE en JSON válido con las claves exactas: diagnosticoBreve (string), puntosAlerta (array de strings), estrategiasRefuerzo (array de strings), recomendacionDirectivo (string).`;
       const response = await ai.models.generateContent({
         model: 'gemini-4-hydrogen',
         contents: prompt,
         config: { responseMimeType: 'application/json' }
       });
-      return JSON.parse(response?.text?.trim() || '{}');
+      const parsed = JSON.parse(response?.text?.trim() || '{}');
+      if (parsed && parsed.diagnosticoBreve) {
+        return parsed;
+      }
     } catch (e) {}
   }
   return {
-    diagnosticoBreve: `El paralelo ${params.paraleloNombre} tiene promedio de ${params.promedioGeneral.toFixed(1)}/10.`,
-    puntosAlerta: [`${params.estudiantesEnRiesgo.length} estudiantes en riesgo`],
-    estrategiasRefuerzo: ['Tutorías personalizadas'],
-    recomendacionDirectivo: 'Formalizar plan de refuerzo.'
+    diagnosticoBreve: `El curso ${params.paraleloNombre} registra un promedio real de ${Number(params.promedioGeneral).toFixed(2)}/10 con ${Number(params.porcentajeAprobados).toFixed(0)}% de aprobación.`,
+    puntosAlerta:
+      params.estudiantesEnRiesgo.length > 0
+        ? [`${params.estudiantesEnRiesgo.length} estudiante(s) con promedio menor a 7.00: ${riesgoTexto}`]
+        : ['Todos los estudiantes evaluados superan el puntaje mínimo de 7.00/10.'],
+    estrategiasRefuerzo:
+      params.estudiantesEnRiesgo.length > 0
+        ? [
+            'Aplicar refuerzo académico focalizado en los estudiantes con promedio menor a 7.00.',
+            params.actividadesCriticas.length > 0
+              ? `Retroalimentar los contenidos evaluados en: ${actTexto}.`
+              : 'Realizar seguimiento continuo de tareas y talleres en clase.'
+          ]
+        : ['Mantener actividades de profundización y aprendizaje colaborativo en el aula.'],
+    recomendacionDirectivo:
+      params.estudiantesEnRiesgo.length > 0
+        ? 'Registrar acta de refuerzo académico y notificar oportunamente a los representantes legales.'
+        : 'Continuar con la planificación microcurricular programada.'
   };
 }
 
@@ -1409,15 +1455,31 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
       let totalEstudiantes = 0;
       let paralelosNombres: string[] = [];
       let claseActual: any = null;
+      let clasesHoy: { hora: string; materiaCurso: string; aula?: string; enCurso?: boolean }[] = [];
+      let horarioSemanal: any[] = [];
       let misParalelos: any[] = [];
-      let asistenciaMes = 95.0;
+      let asistenciaMes = 0;
+      let unidadesActivas = 0;
+      let tareasKanban: any[] = [];
 
       if (auth) {
-        misParalelos = await Paralelo.find(auth.filter);
+        misParalelos = await Paralelo.find(auth.filter).sort({ grado: 1, createdAt: 1 });
         paralelosNombres = misParalelos.map((p: any) => p.nombre);
 
-        const dbUser = (docenteId && /^[a-f\d]{24}$/i.test(String(docenteId)) ? await Usuario.findById(docenteId) : null) ||
-          (userPayload?.email ? await Usuario.findOne({ email: userPayload.email }) : null);
+        const dbUser =
+          (docenteId && /^[a-f\d]{24}$/i.test(String(docenteId)) ? await Usuario.findById(docenteId) : null) ||
+          (userPayload?.email ? await Usuario.findOne({ email: userPayload.email.toLowerCase().trim() }) : null);
+
+        const docenteIds = Array.from(
+          new Set(
+            [
+              auth.primaryDocenteId,
+              dbUser?._id?.toString(),
+              docenteId ? String(docenteId) : ''
+            ].filter(Boolean)
+          )
+        );
+
         if (dbUser) {
           docenteObj = {
             id: dbUser._id.toString(),
@@ -1427,12 +1489,82 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
             institucion: dbUser.institucion,
             materias: dbUser.materias || ['Lengua y Literatura'],
             avatar: dbUser.avatar || DOCENTE_ACTUAL.avatar,
-            distrito: 'Distrito 09D04 · Guayaquil Centro',
             provincia: 'Guayas',
             canton: 'Guayaquil',
             totalAlumnos: 0,
-            asistenciaPromedioGeneral: 100
+            asistenciaPromedioGeneral: 0
           };
+        }
+
+        horarioSemanal =
+          dbUser && Array.isArray((dbUser as any).horarioSemanal) && (dbUser as any).horarioSemanal.length > 0
+            ? (dbUser as any).horarioSemanal.map((h: any) => ({
+                hora: h.hora || '',
+                lunes: h.lunes || '',
+                martes: h.martes || '',
+                miercoles: h.miercoles || '',
+                jueves: h.jueves || '',
+                viernes: h.viernes || ''
+              }))
+            : buildDefaultHorarioFromParalelos(misParalelos);
+
+        const dayIndex = new Date().getDay(); // 0=Sun, 1=Mon ... 5=Fri, 6=Sat
+        const dayKeyMap: Record<number, 'lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes'> = {
+          1: 'lunes',
+          2: 'martes',
+          3: 'miercoles',
+          4: 'jueves',
+          5: 'viernes'
+        };
+        const todayKey = dayKeyMap[dayIndex];
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+        const parseMinutes = (timeStr: string): number | null => {
+          const m = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+          if (!m) return null;
+          return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        };
+
+        if (todayKey && horarioSemanal.length > 0) {
+          clasesHoy = horarioSemanal
+            .map((row: any) => {
+              const cell = String(row[todayKey] || '').trim();
+              if (!cell || cell.toUpperCase().includes('RECESO')) return null;
+              const parts = String(row.hora || '').split('-');
+              const startMin = parts[0] ? parseMinutes(parts[0]) : null;
+              const endMin = parts[1] ? parseMinutes(parts[1]) : null;
+              const enCurso =
+                startMin !== null && endMin !== null && nowMinutes >= startMin && nowMinutes <= endMin;
+              const matchedCurso = misParalelos.find(
+                (p: any) =>
+                  cell.toLowerCase().includes(String(p.nombre || '').toLowerCase()) ||
+                  String(p.nombre || '').toLowerCase().includes(cell.toLowerCase())
+              );
+              return {
+                hora: row.hora || '',
+                materiaCurso: cell,
+                aula: matchedCurso?.aula || '',
+                paraleloId: matchedCurso?._id?.toString() || '',
+                paraleloNombre: matchedCurso?.nombre || cell,
+                materia: matchedCurso?.materia || matchedCurso?.materias?.[0] || docenteObj.materias?.[0] || 'General',
+                enCurso
+              };
+            })
+            .filter(Boolean) as any[];
+
+          const activeBlock = clasesHoy.find((c: any) => c.enCurso) || clasesHoy[0] || null;
+          if (activeBlock) {
+            claseActual = {
+              id: (activeBlock as any).paraleloId || '',
+              paralelo: (activeBlock as any).paraleloNombre || activeBlock.materiaCurso,
+              materia: (activeBlock as any).materia || 'General',
+              aula: activeBlock.aula || 'Aula asignada',
+              horario: activeBlock.hora,
+              enCurso: Boolean(activeBlock.enCurso),
+              tema: activeBlock.enCurso ? 'Clase en curso según tu horario' : 'Próximo bloque programado hoy'
+            };
+          }
         }
 
         const paraleloIds = misParalelos.map((p: any) => p._id.toString());
@@ -1452,81 +1584,97 @@ app.get('/api/dashboard', async (req: Request, res: Response) => {
             let presentes = 0;
             asistencias.forEach((a: any) => {
               (a.registros || []).forEach((r: any) => {
-                totalRegs++;
-                if (r.estado === 'P' || r.justificada) presentes++;
+                if (r.estado) {
+                  totalRegs++;
+                  if (r.estado === 'P' || r.justificada) presentes++;
+                }
               });
             });
             if (totalRegs > 0) {
               asistenciaMes = Number(((presentes / totalRegs) * 100).toFixed(1));
             }
           }
-
-          const primerParalelo = misParalelos[0];
-          claseActual = {
-            paralelo: primerParalelo.nombre,
-            materia: primerParalelo.materia || primerParalelo.materias?.[0] || 'General',
-            aula: primerParalelo.aula || 'Bloque B · Aula 204',
-            horario: primerParalelo.horario || '07:15 a 08:45',
-            tema: 'Sesión curricular activa'
-          };
         }
-      }
 
-      if (misParalelos.length === 0) {
-        totalEstudiantes = 0;
-        paralelosNombres = [];
-        actividadesPendientes = 0;
-        claseActual = null;
-        asistenciaMes = 0;
+        unidadesActivas = await Planificacion.countDocuments({
+          docenteId: { $in: docenteIds },
+          estado: { $in: ['En curso', 'Por iniciar'] }
+        });
+
+        const rawKanban = await KanbanTask.find({
+          docenteId: { $in: docenteIds }
+        }).sort({ createdAt: -1 });
+
+        tareasKanban = rawKanban.map((t: any) => ({
+          id: t._id.toString(),
+          titulo: t.titulo,
+          descripcion: t.descripcion || '',
+          paralelo: t.paralelo || 'General',
+          columna: t.columna || 'Por hacer',
+          prioridad: t.prioridad || 'Media',
+          urgencia: t.urgencia || 'Media',
+          fechaLimite: t.fechaLimite || '',
+          completada: t.columna === 'Completado'
+        }));
       }
 
       docenteObj.totalAlumnos = totalEstudiantes;
       docenteObj.asistenciaPromedioGeneral = asistenciaMes;
 
-      const smartTodo = misParalelos.length > 0
-        ? await sugerirTareasTodo({
-            actividadesSinCalificar: actividadesPendientes,
-            planificacionesPorIniciar: 1,
-            asistenciaPendienteHoy: true,
-            paralelosNombres: paralelosNombres.length > 0 ? paralelosNombres : []
-          })
-        : [];
+      const totalBloquesSemana = horarioSemanal.reduce((acc, row) => {
+        const dias: ('lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes')[] = [
+          'lunes',
+          'martes',
+          'miercoles',
+          'jueves',
+          'viernes'
+        ];
+        dias.forEach((d) => {
+          const val = String(row[d] || '').trim();
+          if (val && !val.toUpperCase().includes('RECESO')) acc++;
+        });
+        return acc;
+      }, 0);
 
       return res.json({
         success: true,
         docente: docenteObj,
         resumenHoy: {
           fecha: new Date().toLocaleDateString('es-EC', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-          jornada: 'Matutina (07:15 - 12:45)',
-          claseActual
+          jornada: misParalelos[0]?.jornada ? `${misParalelos[0].jornada}` : 'Matutina',
+          claseActual,
+          clasesHoy,
+          horarioSemanal
         },
         estadisticas: {
           totalEstudiantes,
           actividadesPorCalificar: actividadesPendientes,
-          clasesPlanificadasSemana: misParalelos.length * 4,
+          clasesPlanificadasSemana: totalBloquesSemana,
           asistenciaPromedioMes: asistenciaMes,
-          informesGenerados: 0
+          unidadesActivas,
+          informesGenerados: unidadesActivas
         },
-        porHacerInteligente: smartTodo,
-        ultimasActividades: misParalelos.length > 0
-          ? [{ id: '1', accion: 'Asistencia registrada', detalle: paralelosNombres[0] || 'Paralelo', tiempo: 'Hace 45 min' }]
-          : []
+        tareasKanban,
+        porHacerInteligente: [],
+        ultimasActividades: []
       });
     } catch (e) {
-      console.warn('Error calculando dashboard desde MongoDB:', e);
+      console.warn('Error calculando dashboard:', e);
     }
   }
 
-  // Fallback memoria para usuario nuevo sin datos
   res.json({
     success: true,
     docente: DOCENTE_ACTUAL,
     resumenHoy: {
       fecha: new Date().toLocaleDateString('es-EC', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      jornada: 'Matutina (07:15 - 12:45)',
-      claseActual: null
+      jornada: 'Matutina',
+      claseActual: null,
+      clasesHoy: [],
+      horarioSemanal: []
     },
-    estadisticas: { totalEstudiantes: 0, actividadesPorCalificar: 0, clasesPlanificadasSemana: 0, asistenciaPromedioMes: 0, informesGenerados: 0 },
+    estadisticas: { totalEstudiantes: 0, actividadesPorCalificar: 0, clasesPlanificadasSemana: 0, asistenciaPromedioMes: 0, unidadesActivas: 0, informesGenerados: 0 },
+    tareasKanban: [],
     porHacerInteligente: [],
     ultimasActividades: []
   });
@@ -1576,7 +1724,7 @@ app.get('/api/paralelos', async (req: Request, res: Response) => {
 app.post('/api/paralelos', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, true);
@@ -1664,7 +1812,7 @@ app.post('/api/paralelos', async (req: Request, res: Response) => {
 app.put('/api/paralelos/:id', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, true);
@@ -1730,7 +1878,7 @@ app.put('/api/paralelos/:id', async (req: Request, res: Response) => {
 app.delete('/api/paralelos/:id', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, true);
@@ -1764,7 +1912,7 @@ app.delete('/api/paralelos/:id', async (req: Request, res: Response) => {
 app.get('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, true);
@@ -1801,7 +1949,7 @@ app.get('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
 app.post('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, true);
@@ -1902,7 +2050,7 @@ app.post('/api/paralelos/:id/alumnos', async (req: Request, res: Response) => {
 app.delete('/api/paralelos/:id/alumnos/:alumnoId', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, true);
@@ -2057,7 +2205,7 @@ app.get('/api/horario', async (req: Request, res: Response) => {
 app.put('/api/horario', async (req: Request, res: Response) => {
   await connectDB();
   if (!isMongoConnected()) {
-    return res.status(503).json({ success: false, error: 'MongoDB no conectado' });
+    return res.status(503).json({ success: false, error: 'Servicio de base de datos no disponible' });
   }
   try {
     const auth = await resolveDocenteParaleloFilter(req, false);
@@ -2089,7 +2237,7 @@ app.put('/api/horario', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       horario: sanitizedHorario,
-      message: 'Horario semanal guardado en MongoDB'
+      message: 'Horario semanal guardado correctamente'
     });
   } catch (e: any) {
     return res.status(500).json({ success: false, error: e.message || 'Error al guardar horario' });
@@ -2244,7 +2392,7 @@ app.post('/api/asistencia/:cursoId', async (req: Request, res: Response) => {
       }
       return res.json({
         success: true,
-        message: 'Asistencia guardada en MongoDB',
+        message: 'Asistencia guardada correctamente',
         paraleloId: cursoId,
         fecha: fechaRegistro
       });
@@ -2420,7 +2568,7 @@ app.put('/api/calificaciones/celda', async (req: Request, res: Response) => {
         { paraleloId, estudianteId, actividadId, nota: finalNota },
         { upsert: true, new: true }
       );
-      return res.json({ success: true, nota: finalNota, message: 'Nota guardada en MongoDB' });
+      return res.json({ success: true, nota: finalNota, message: 'Nota guardada correctamente' });
     } catch (err) {
       console.warn('Error guardando calificación en MongoDB:', err);
     }
@@ -2640,27 +2788,65 @@ app.delete('/api/workspace/kanban/:id', async (req: Request, res: Response) => {
       const docenteId = userPayload?.id || 'docente-1';
       const deleted = await KanbanTask.findOneAndDelete({ _id: id, docenteId });
       if (!deleted) return res.status(404).json({ success: false, error: 'Tarea no encontrada' });
-      return res.json({ success: true, message: 'Eliminada de MongoDB' });
+      return res.json({ success: true, message: 'Tarea eliminada correctamente' });
     } catch (err) {}
   }
 
   kanbanTasks = kanbanTasks.filter(t => t.id !== id);
-  res.json({ success: true, message: 'Eliminada de memoria' });
+  res.json({ success: true, message: 'Tarea eliminada' });
 });
 
 // Other endpoints
 app.post('/api/ai/analisis-rendimiento', async (req: Request, res: Response) => {
-  const { paraleloId } = req.body;
-  const paralelo = paralelosState.find((p: any) => p.id === paraleloId) || paralelosState[0];
+  const {
+    paraleloId,
+    paraleloNombre,
+    materia,
+    promedioGeneral,
+    porcentajeAprobados,
+    estudiantesEnRiesgo,
+    actividadesCriticas,
+    totalCalificaciones
+  } = req.body || {};
+
+  if (typeof totalCalificaciones === 'number' && totalCalificaciones === 0) {
+    return res.json({ success: true, sinCalificaciones: true, analisis: null });
+  }
+
+  let resolvedNombre = paraleloNombre || 'Curso';
+  let resolvedMateria = materia || 'General';
+  let resolvedPromedio = typeof promedioGeneral === 'number' ? promedioGeneral : 0;
+  let resolvedAprobados = typeof porcentajeAprobados === 'number' ? porcentajeAprobados : 0;
+  let resolvedRiesgo = Array.isArray(estudiantesEnRiesgo) ? estudiantesEnRiesgo : [];
+  let resolvedCriticas = Array.isArray(actividadesCriticas) ? actividadesCriticas : [];
+
+  await connectDB();
+  if (isMongoConnected() && paraleloId && typeof totalCalificaciones !== 'number') {
+    try {
+      const pDoc = /^[0-9a-fA-F]{24}$/.test(String(paraleloId))
+        ? await Paralelo.findById(paraleloId)
+        : await Paralelo.findOne({ nombre: paraleloId });
+      if (pDoc) {
+        resolvedNombre = pDoc.nombre;
+        resolvedMateria = pDoc.materia || pDoc.materias?.[0] || 'General';
+        const pIdStr = pDoc._id.toString();
+        const calificaciones = await Calificacion.find({ paraleloId: { $in: [pIdStr, paraleloId] } });
+        if (calificaciones.length === 0) {
+          return res.json({ success: true, sinCalificaciones: true, analisis: null });
+        }
+      }
+    } catch (e) {}
+  }
+
   const analisis = await analizarRendimientoGrupo({
-    paraleloNombre: paralelo.nombre,
-    materia: paralelo.materia,
-    promedioGeneral: 8.2,
-    porcentajeAprobados: 90,
-    estudiantesEnRiesgo: [],
-    actividadesCriticas: []
+    paraleloNombre: resolvedNombre,
+    materia: resolvedMateria,
+    promedioGeneral: resolvedPromedio,
+    porcentajeAprobados: resolvedAprobados,
+    estudiantesEnRiesgo: resolvedRiesgo,
+    actividadesCriticas: resolvedCriticas
   });
-  res.json({ success: true, analisis });
+  res.json({ success: true, sinCalificaciones: false, analisis });
 });
 
 app.post('/api/ai/informe', async (req: Request, res: Response) => {
@@ -2677,35 +2863,61 @@ app.post('/api/ai/informe', async (req: Request, res: Response) => {
   res.json({ success: true, informe });
 });
 
+const serializePlanificacion = (p: any) => ({
+  id: p._id ? p._id.toString() : p.id,
+  docenteId: p.docenteId,
+  paraleloId: p.paraleloId || '',
+  paralelo: p.paralelo || '',
+  materia: p.materia || 'Lengua y Literatura',
+  bloque: p.bloque || 2,
+  titulo: p.titulo || 'Unidad Microcurricular',
+  destreza: p.destreza || '',
+  semanas: p.semanas || 4,
+  fechaInicio: p.fechaInicio || '',
+  fechaFin: p.fechaFin || '',
+  diasImparticion: Array.isArray(p.diasImparticion) ? p.diasImparticion : [],
+  progreso: typeof p.progreso === 'number' ? p.progreso : 0,
+  estado: p.estado || 'Por iniciar',
+  generadaIA: Boolean(p.generadaIA),
+  objetivos: Array.isArray(p.objetivos) ? p.objetivos : [],
+  recursos: Array.isArray(p.recursos) ? p.recursos : [],
+  criteriosEvaluacion: Array.isArray(p.criteriosEvaluacion) ? p.criteriosEvaluacion : [],
+  secuenciaClases: Array.isArray(p.secuenciaClases)
+    ? p.secuenciaClases.map((s: any, idx: number) => ({
+        semana: s.semana || idx + 1,
+        tema: s.tema || '',
+        contenido: s.contenido || '',
+        actividad: s.actividad || s.actividadSugerida || '',
+        actividadSugerida: s.actividadSugerida || s.actividad || '',
+        completada: Boolean(s.completada)
+      }))
+    : [],
+  archivosAdjuntos: Array.isArray(p.archivosAdjuntos)
+    ? p.archivosAdjuntos.map((a: any) => ({
+        nombre: a.nombre || 'Archivo',
+        tipo: a.tipo || 'application/octet-stream',
+        tamano: a.tamano || '',
+        contenidoBase64: a.contenidoBase64 || '',
+        fecha: a.fecha || ''
+      }))
+    : []
+});
+
 app.get('/api/planificacion', async (req: Request, res: Response) => {
   await connectDB();
   if (isMongoConnected()) {
     try {
-      const userPayload = getUserFromToken(req);
-      const docenteId = userPayload?.id || 'docente-1';
-      const plans = await Planificacion.find({ docenteId }).sort({ createdAt: -1 });
+      const auth = await resolveDocenteParaleloFilter(req, true);
+      const userPayload = auth?.userPayload || getUserFromToken(req);
+      const docenteId = auth?.primaryDocenteId || userPayload?.id || 'docente-1';
+      const ids = Array.from(new Set([docenteId, userPayload?.id].filter(Boolean)));
+      const plans = await Planificacion.find({ docenteId: { $in: ids } }).sort({ createdAt: -1 });
       return res.json({
         success: true,
-        planificaciones: plans.map((p: any) => ({
-          id: p._id.toString(),
-          docenteId: p.docenteId,
-          paraleloId: p.paraleloId,
-          materia: p.materia,
-          bloque: p.bloque,
-          titulo: p.titulo,
-          destreza: p.destreza,
-          semanas: p.semanas,
-          progreso: p.progreso,
-          estado: p.estado,
-          generadaIA: p.generadaIA,
-          objetivos: p.objetivos || [],
-          recursos: p.recursos || [],
-          criteriosEvaluacion: p.criteriosEvaluacion || [],
-          secuenciaClases: p.secuenciaClases || []
-        }))
+        planificaciones: plans.map(serializePlanificacion)
       });
     } catch (e) {
-      console.warn('Error leyendo planificaciones de MongoDB:', e);
+      console.warn('Error leyendo planificaciones:', e);
     }
   }
   res.json({ success: true, planificaciones: [] });
@@ -2724,49 +2936,160 @@ app.post('/api/planificacion/generar-ia', async (req: Request, res: Response) =>
 });
 
 app.post('/api/planificacion', async (req: Request, res: Response) => {
-  const userPayload = getUserFromToken(req);
-  const docenteId = userPayload?.id || 'docente-1';
-  const nuevoPlan = {
-    id: `plan-${Date.now()}`,
-    docenteId,
-    progreso: 0,
-    estado: 'Por iniciar',
-    generadaIA: true,
-    ...req.body
-  };
-  planificacionesState.push(nuevoPlan);
-
   await connectDB();
+  const auth = await resolveDocenteParaleloFilter(req, true);
+  const userPayload = auth?.userPayload || getUserFromToken(req);
+  const docenteId = auth?.primaryDocenteId || userPayload?.id || 'docente-1';
+
+  const rawSecuencia = Array.isArray(req.body.secuenciaClases)
+    ? req.body.secuenciaClases.map((s: any, idx: number) => ({
+        semana: Number(s.semana) || idx + 1,
+        tema: String(s.tema || '').trim(),
+        contenido: String(s.contenido || '').trim(),
+        actividad: String(s.actividad || s.actividadSugerida || '').trim(),
+        actividadSugerida: String(s.actividadSugerida || s.actividad || '').trim(),
+        completada: Boolean(s.completada)
+      }))
+    : [];
+
+  const completadasCount = rawSecuencia.filter((s: any) => s.completada).length;
+  const computedProgreso =
+    rawSecuencia.length > 0 && completadasCount > 0
+      ? Math.round((completadasCount / rawSecuencia.length) * 100)
+      : Number(req.body.progreso) || 0;
+
   if (isMongoConnected()) {
     try {
       const created = await Planificacion.create({
         docenteId,
-        paraleloId: req.body.paraleloId,
+        paraleloId: req.body.paraleloId || '',
+        paralelo: req.body.paralelo || '',
         materia: req.body.materia || 'Lengua y Literatura',
         bloque: Number(req.body.bloque) || 2,
         titulo: req.body.titulo || 'Nueva Planificación',
         destreza: req.body.destreza || '',
-        semanas: Number(req.body.semanas) || 4,
-        progreso: req.body.progreso || 0,
+        semanas: Number(req.body.semanas) || Math.max(1, rawSecuencia.length || 4),
+        fechaInicio: req.body.fechaInicio || '',
+        fechaFin: req.body.fechaFin || '',
+        diasImparticion: Array.isArray(req.body.diasImparticion) ? req.body.diasImparticion : [],
+        progreso: computedProgreso,
         estado: req.body.estado || 'Por iniciar',
         generadaIA: Boolean(req.body.generadaIA),
-        objetivos: req.body.objetivos || [],
-        recursos: req.body.recursos || [],
-        criteriosEvaluacion: req.body.criteriosEvaluacion || [],
-        secuenciaClases: req.body.secuenciaClases || []
+        objetivos: Array.isArray(req.body.objetivos) ? req.body.objetivos : [],
+        recursos: Array.isArray(req.body.recursos) ? req.body.recursos : [],
+        criteriosEvaluacion: Array.isArray(req.body.criteriosEvaluacion) ? req.body.criteriosEvaluacion : [],
+        secuenciaClases: rawSecuencia,
+        archivosAdjuntos: Array.isArray(req.body.archivosAdjuntos) ? req.body.archivosAdjuntos : []
       });
       return res.status(201).json({
         success: true,
-        plan: {
-          id: created._id.toString(),
-          ...created.toObject()
-        }
+        plan: serializePlanificacion(created)
       });
     } catch (e) {
-      console.warn('Error guardando planificación en MongoDB:', e);
+      console.warn('Error guardando planificación:', e);
     }
   }
+
+  const nuevoPlan = serializePlanificacion({
+    id: `plan-${Date.now()}`,
+    docenteId,
+    ...req.body,
+    secuenciaClases: rawSecuencia,
+    progreso: computedProgreso
+  });
+  planificacionesState.push(nuevoPlan);
   res.status(201).json({ success: true, plan: nuevoPlan });
+});
+
+app.put('/api/planificacion/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  await connectDB();
+  if (isMongoConnected() && /^[0-9a-fA-F]{24}$/.test(id)) {
+    try {
+      const auth = await resolveDocenteParaleloFilter(req, true);
+      const userPayload = auth?.userPayload || getUserFromToken(req);
+      const docenteId = auth?.primaryDocenteId || userPayload?.id || 'docente-1';
+      const ids = Array.from(new Set([docenteId, userPayload?.id].filter(Boolean)));
+
+      const existing = await Planificacion.findOne({ _id: id, docenteId: { $in: ids } });
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Planificación no encontrada' });
+      }
+
+      const fields = [
+        'paraleloId',
+        'paralelo',
+        'materia',
+        'bloque',
+        'titulo',
+        'destreza',
+        'semanas',
+        'fechaInicio',
+        'fechaFin',
+        'diasImparticion',
+        'estado',
+        'progreso',
+        'objetivos',
+        'recursos',
+        'criteriosEvaluacion',
+        'archivosAdjuntos'
+      ];
+      fields.forEach((f) => {
+        if (req.body[f] !== undefined) {
+          (existing as any)[f] = req.body[f];
+        }
+      });
+
+      if (Array.isArray(req.body.secuenciaClases)) {
+        const sanitizedSec = req.body.secuenciaClases.map((s: any, idx: number) => ({
+          semana: Number(s.semana) || idx + 1,
+          tema: String(s.tema || '').trim(),
+          contenido: String(s.contenido || '').trim(),
+          actividad: String(s.actividad || s.actividadSugerida || '').trim(),
+          actividadSugerida: String(s.actividadSugerida || s.actividad || '').trim(),
+          completada: Boolean(s.completada)
+        }));
+        (existing as any).secuenciaClases = sanitizedSec;
+
+        if (req.body.progreso === undefined) {
+          const done = sanitizedSec.filter((s: any) => s.completada).length;
+          (existing as any).progreso = sanitizedSec.length > 0 ? Math.round((done / sanitizedSec.length) * 100) : 0;
+        }
+      }
+
+      await existing.save();
+      return res.json({
+        success: true,
+        plan: serializePlanificacion(existing),
+        message: 'Planificación guardada correctamente'
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message || 'Error al actualizar planificación' });
+    }
+  }
+  return res.status(404).json({ success: false, error: 'Planificación no encontrada' });
+});
+
+app.delete('/api/planificacion/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  await connectDB();
+  if (isMongoConnected() && /^[0-9a-fA-F]{24}$/.test(id)) {
+    try {
+      const auth = await resolveDocenteParaleloFilter(req, true);
+      const userPayload = auth?.userPayload || getUserFromToken(req);
+      const docenteId = auth?.primaryDocenteId || userPayload?.id || 'docente-1';
+      const ids = Array.from(new Set([docenteId, userPayload?.id].filter(Boolean)));
+
+      const deleted = await Planificacion.findOneAndDelete({ _id: id, docenteId: { $in: ids } });
+      if (!deleted) {
+        return res.status(404).json({ success: false, error: 'Planificación no encontrada' });
+      }
+      return res.json({ success: true, message: 'Planificación eliminada correctamente' });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message || 'Error al eliminar planificación' });
+    }
+  }
+  return res.status(404).json({ success: false, error: 'Planificación no encontrada' });
 });
 
 app.get('/api/workspace', async (req: Request, res: Response) => {

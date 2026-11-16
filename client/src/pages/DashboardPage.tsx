@@ -2,25 +2,36 @@ import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_URL } from '../config/api';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
+import { Card, Button, InfoTooltip, Skeleton, EmptyState } from '../components/ui';
 import { Modal } from '../components/ui/Dialogs';
 import {
   Calendar,
   Clock,
-  UserCheck,
-  GraduationCap,
   Sparkles,
   BookOpenCheck,
-  CheckCircle2,
-  AlertCircle,
   Plus,
-  ArrowRight,
   TrendingUp,
-  FileText,
-  Users,
-  Compass,
-  AlertTriangle
+  Lock
 } from 'lucide-react';
+
+interface TodoKanbanItem {
+  id: string;
+  titulo: string;
+  descripcion?: string;
+  paralelo?: string;
+  columna: 'Por hacer' | 'En progreso' | 'Completado';
+  urgencia: 'Alta' | 'Media' | 'Baja';
+  prioridad?: 'Alta' | 'Media' | 'Baja';
+  fechaLimite?: string;
+  observaciones?: string;
+  completada: boolean;
+}
+
+const parseTimeMinutes = (timeStr: string): number | null => {
+  const m = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+};
 
 export const DashboardPage: React.FC = () => {
   const { user, token, institucionActiva } = useAuth();
@@ -28,47 +39,59 @@ export const DashboardPage: React.FC = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [todoList, setTodoList] = useState<any[]>([]);
+  const [todoList, setTodoList] = useState<TodoKanbanItem[]>([]);
 
-  useEffect(() => {
-    fetch(`${API_URL}/api/dashboard`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        setData(d);
-        if (Array.isArray(d?.porHacerInteligente) && d.porHacerInteligente.length > 0) {
-          setTodoList(
-            d.porHacerInteligente.map((t: any, i: number) => ({
-              id: `t-smart-${i}`,
-              titulo: t.titulo || t.texto || t,
-              urgencia: t.urgencia || 'Media',
-              fechaLimite: t.fechaLimite || new Date().toISOString().slice(0, 10),
-              observaciones: t.observaciones || t.motivo || 'Generado por análisis del paralelo.',
-              modulo: t.modulo || 'Asistencia',
-              link: t.link || '/asistencia',
-              completada: false
-            }))
-          );
-        }
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Formulario de tarea con urgencia, fecha límite y observaciones (P3.2)
+  // Formulario de tarea sincronizado con Kanban de Workspace
   const [nuevaTareaTitulo, setNuevaTareaTitulo] = useState('');
   const [nuevaTareaUrgencia, setNuevaTareaUrgencia] = useState<'Alta' | 'Media' | 'Baja'>('Media');
   const [nuevaTareaFecha, setNuevaTareaFecha] = useState('');
   const [nuevaTareaObs, setNuevaTareaObs] = useState('');
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [guardandoTarea, setGuardandoTarea] = useState(false);
 
-  // Cálculo de hora en tiempo real para determinar clase en curso
+  // Hora en tiempo real para evaluación dinámica del Horario del Día
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 30000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`${API_URL}/api/dashboard`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then((r) => r.json()),
+      fetch(`${API_URL}/api/workspace/kanban`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then((r) => (r.ok ? r.json() : { kanbanTasks: [] }))
+        .catch(() => ({ kanbanTasks: [] }))
+    ])
+      .then(([dashData, kbData]) => {
+        setData(dashData);
+        const rawTasks = Array.isArray(kbData?.kanbanTasks)
+          ? kbData.kanbanTasks
+          : Array.isArray(dashData?.tareasKanban)
+          ? dashData.tareasKanban
+          : [];
+        setTodoList(
+          rawTasks.map((t: any) => ({
+            id: t.id || t._id,
+            titulo: t.titulo,
+            descripcion: t.descripcion || '',
+            paralelo: t.paralelo || 'General',
+            columna: t.columna || 'Por hacer',
+            urgencia: t.urgencia || t.prioridad || 'Media',
+            prioridad: t.prioridad || t.urgencia || 'Media',
+            fechaLimite: t.fechaLimite || '',
+            observaciones: t.observaciones || t.descripcion || '',
+            completada: t.columna === 'Completado'
+          }))
+        );
+      })
+      .finally(() => setLoading(false));
+  }, [token]);
 
   useEffect(() => {
     if (searchParams.get('onboarding') === 'true') {
@@ -79,62 +102,127 @@ export const DashboardPage: React.FC = () => {
   if (loading) return <Skeleton className="h-[600px] w-full" />;
   if (!data) return <EmptyState mensaje="No hay datos aún" />;
 
+  // Evaluación dinámica en tiempo real del Horario del Día según el horario configurado por el docente
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+  const dayIndex = currentTime.getDay(); // 0=Dom, 1=Lun..5=Vie, 6=Sáb
+  const dayKeyMap: Record<number, 'lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes'> = {
+    1: 'lunes',
+    2: 'martes',
+    3: 'miercoles',
+    4: 'jueves',
+    5: 'viernes'
+  };
+  const todayKey = dayKeyMap[dayIndex];
+  const horarioSemanal = Array.isArray(data?.resumenHoy?.horarioSemanal)
+    ? data.resumenHoy.horarioSemanal
+    : [];
 
-  // Horario del docente Andrés Morales:
-  // 07:15 (435m) a 08:45 (525m): 8vo A
-  // 08:45 (525m) a 10:00 (600m): 9no B
-  // 10:00 a 10:30: Receso
-  // 10:30 a 11:45: Refuerzo / Tutoría
-  let claseEnCurso = null;
-  if (currentMinutes >= 435 && currentMinutes < 525) {
-    claseEnCurso = {
-      paralelo: '8vo EGB "A"',
-      materia: 'Lengua y Literatura',
-      aula: 'Aula 204 · Bloque B',
-      horario: '07:15 - 08:45',
-      tema: 'Estructura del ensayo y conectores argumentativos',
-      link: '/asistencia/par-8vo-a'
-    };
-  } else if (currentMinutes >= 525 && currentMinutes < 600) {
-    claseEnCurso = {
-      paralelo: '9no EGB "B"',
-      materia: 'Lengua y Literatura',
-      aula: 'Aula 102 · Bloque C',
-      horario: '08:45 - 10:00',
-      tema: 'Métrica y recursos estilísticos en la poesía lírica',
-      link: '/asistencia/par-9no-b'
-    };
-  }
+  const bloquesHoy = todayKey
+    ? horarioSemanal
+        .map((row: any) => {
+          const valorCelda = String(row[todayKey] || '').trim();
+          if (!valorCelda || valorCelda.toUpperCase().includes('RECESO')) return null;
+          const partesHora = String(row.hora || '').split('-');
+          const inicioMin = partesHora[0] ? parseTimeMinutes(partesHora[0]) : null;
+          const finMin = partesHora[1] ? parseTimeMinutes(partesHora[1]) : null;
+          const enCurso =
+            inicioMin !== null &&
+            finMin !== null &&
+            currentMinutes >= inicioMin &&
+            currentMinutes <= finMin;
+          const proximo =
+            inicioMin !== null && currentMinutes < inicioMin;
+          return {
+            hora: row.hora || '',
+            contenido: valorCelda,
+            enCurso,
+            proximo
+          };
+        })
+        .filter(Boolean)
+    : [];
 
-  const handleToggleTodo = (id: string) => {
-    setTodoList(
-      todoList.map((t) => (t.id === id ? { ...t, completada: !t.completada } : t))
+  const bloqueEnCurso = bloquesHoy.find((b: any) => b.enCurso) || null;
+
+  const handleToggleTodo = async (item: TodoKanbanItem) => {
+    const nuevoCompletada = !item.completada;
+    const nuevaColumna: 'Por hacer' | 'Completado' = nuevoCompletada ? 'Completado' : 'Por hacer';
+
+    setTodoList((prev) =>
+      prev.map((t) =>
+        t.id === item.id ? { ...t, completada: nuevoCompletada, columna: nuevaColumna } : t
+      )
     );
+
+    try {
+      await fetch(`${API_URL}/api/workspace/kanban/${item.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ columna: nuevaColumna })
+      });
+    } catch (e) {
+      console.warn('Error actualizando estado de tarea:', e);
+    }
   };
 
-  const handleAddTarea = (e: React.FormEvent) => {
+  const handleAddTarea = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevaTareaTitulo.trim()) return;
+    setGuardandoTarea(true);
 
-    setTodoList([
-      {
-        id: `t-${Date.now()}`,
-        titulo: nuevaTareaTitulo.trim(),
-        urgencia: nuevaTareaUrgencia,
-        fechaLimite: nuevaTareaFecha || new Date().toISOString().slice(0, 10),
-        observaciones: nuevaTareaObs.trim(),
-        modulo: 'Personal',
-        link: '/workspace',
-        completada: false
-      },
-      ...todoList
-    ]);
+    const payload = {
+      titulo: nuevaTareaTitulo.trim(),
+      descripcion: nuevaTareaObs.trim(),
+      observaciones: nuevaTareaObs.trim(),
+      paralelo: 'General',
+      columna: 'Por hacer' as const,
+      prioridad: nuevaTareaUrgencia,
+      urgencia: nuevaTareaUrgencia,
+      fechaLimite: nuevaTareaFecha || new Date().toISOString().slice(0, 10)
+    };
 
-    setNuevaTareaTitulo('');
-    setNuevaTareaObs('');
-    setNuevaTareaFecha('');
-    setShowTaskForm(false);
+    try {
+      const res = await fetch(`${API_URL}/api/workspace/kanban`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const d = await res.json();
+        const t = d.tarea;
+        if (t) {
+          setTodoList((prev) => [
+            {
+              id: t.id,
+              titulo: t.titulo,
+              descripcion: t.descripcion || '',
+              paralelo: t.paralelo || 'General',
+              columna: t.columna || 'Por hacer',
+              urgencia: t.urgencia || t.prioridad || 'Media',
+              prioridad: t.prioridad || t.urgencia || 'Media',
+              fechaLimite: t.fechaLimite || '',
+              observaciones: t.observaciones || t.descripcion || '',
+              completada: t.columna === 'Completado'
+            },
+            ...prev
+          ]);
+        }
+      }
+    } catch (err) {
+      console.warn('Error creando tarea:', err);
+    } finally {
+      setGuardandoTarea(false);
+      setNuevaTareaTitulo('');
+      setNuevaTareaObs('');
+      setNuevaTareaFecha('');
+      setShowTaskForm(false);
+    }
   };
 
   const fechaEcuador = currentTime.toLocaleDateString('es-EC', {
@@ -171,13 +259,13 @@ export const DashboardPage: React.FC = () => {
     <div className="space-y-6 text-left">
       {/* 1. SECCIÓN SUPERIOR — RESUMEN DEL DÍA */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Card Hoy */}
+        {/* Card Hoy (Horario del Día dinámico) */}
         <Card className="lg:col-span-2 p-6 bg-gradient-to-br from-[#0A2239] to-[#12365a] text-white relative overflow-hidden border-none shadow-xl">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-700/80 gap-2">
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-[#9ED8ED] uppercase tracking-wider">
-                  Jornada Matutina · Régimen Costa
+                  Jornada {data?.resumenHoy?.jornada || 'Matutina'}
                 </span>
                 <span className="text-xs text-slate-400 font-mono">
                   {currentTime.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}
@@ -192,109 +280,118 @@ export const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Clases del día */}
+          {/* Horario del día sincronizado con el horario semanal del docente */}
           <div className="mt-5 space-y-3">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
-                Horario del Día
-              </span>
-              <InfoTooltip content="Muestra la clase activa y la siguiente según tu carga horaria semanal." />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
+                  Horario del Día
+                </span>
+                <InfoTooltip content="Sincronizado en tiempo real con tu horario semanal configurado." />
+              </div>
+              <Link
+                to="/perfil"
+                className="text-[11px] font-semibold text-[#9ED8ED] hover:underline"
+              >
+                Configurar horario →
+              </Link>
             </div>
 
-            <div className="grid grid-cols-1 gap-3">
-              {data?.resumenHoy?.claseActual ? (
-                <div className="p-3.5 rounded-xl bg-[#176087]/80 border border-[#9ED8ED]/40 flex flex-col justify-between relative overflow-hidden">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                      En Curso Ahora
-                    </span>
-                    <span className="text-xs font-mono font-bold text-white">{data.resumenHoy.claseActual.horario}</span>
+            {bloquesHoy.length === 0 ? (
+              <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-700/50 flex flex-col items-center justify-center text-center py-6">
+                <Clock className="w-5 h-5 text-slate-400 mb-1.5" />
+                <h4 className="text-sm font-semibold text-slate-300">
+                  {todayKey
+                    ? 'Sin bloques programados para hoy en tu horario'
+                    : 'Fin de semana — Sin clases programadas'}
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {todayKey
+                    ? 'Puedes asignar o editar tus franjas horarias desde Perfil y Ajustes.'
+                    : 'Tus bloques de lunes a viernes se mostrarán aquí automáticamente.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {bloqueEnCurso && (
+                  <div className="p-3.5 rounded-xl bg-[#176087]/90 border border-[#9ED8ED]/50 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-emerald-500 text-white flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                        En Curso Ahora
+                      </span>
+                      <span className="text-xs font-mono font-bold text-white">
+                        {bloqueEnCurso.hora}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-white">{bloqueEnCurso.contenido}</h4>
+                    <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-end">
+                      <Link
+                        to="/asistencia"
+                        className="text-xs font-bold text-[#9ED8ED] hover:underline"
+                      >
+                        Tomar asistencia →
+                      </Link>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">{data.resumenHoy.claseActual.paralelo} · {data.resumenHoy.claseActual.materia}</h4>
-                    <p className="text-xs text-[#9ED8ED] mt-0.5">{data.resumenHoy.claseActual.tema || 'Actividad docente'}</p>
-                  </div>
-                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-200">{data.resumenHoy.claseActual.aula || 'Aula asignada'}</span>
-                    <Link
-                      to="/asistencia"
-                      className="text-xs font-bold text-[#9ED8ED] hover:underline"
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {bloquesHoy.map((b: any, i: number) => (
+                    <div
+                      key={i}
+                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                        b.enCurso
+                          ? 'bg-[#176087]/40 border-[#9ED8ED]/60 text-white font-bold'
+                          : 'bg-slate-900/40 border-slate-700/60 text-slate-200'
+                      }`}
                     >
-                      Tomar asistencia →
-                    </Link>
-                  </div>
+                      <div className="truncate">
+                        <span className="font-mono text-[11px] text-[#9ED8ED] block">
+                          {b.hora}
+                        </span>
+                        <span className="font-semibold truncate block">{b.contenido}</span>
+                      </div>
+                      {b.enCurso && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 shrink-0">
+                          Activo
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-700/50 flex flex-col items-center justify-center text-center py-6">
-                  <Clock className="w-5 h-5 text-slate-400 mb-1.5" />
-                  <h4 className="text-sm font-semibold text-slate-300">Sin clases en curso ahora</h4>
-                  <p className="text-xs text-slate-400 mt-0.5">No hay bloques de clase programados para este momento.</p>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </Card>
 
-        {/* Acceso Rápido */}
+        {/* Card Accesos Rápidos (Sección desactivada sin acciones por defecto) */}
         <Card className="p-6 flex flex-col justify-between space-y-4">
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#176087] dark:text-[#9ED8ED]">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Accesos Rápidos
               </span>
-              <InfoTooltip content="Atajos directos para tus acciones diarias más frecuentes." />
+              <InfoTooltip content="Esta sección se encuentra desactivada temporalmente." />
             </div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
               Acciones Frecuentes
             </h3>
           </div>
 
-          <div className="grid grid-cols-1 gap-2.5">
-            <Link to="/asistencia">
-              <Button variant="primary" size="md" className="w-full justify-between">
-                <span className="flex items-center gap-2">
-                  <UserCheck className="w-4 h-4" />
-                  Tomar asistencia hoy
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
-
-            <Link to="/workspace">
-              <Button variant="outline" size="md" className="w-full justify-between">
-                <span className="flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  Nueva tarea en Workspace
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
-
-            <Link to="/planificacion">
-              <Button variant="outline" size="md" className="w-full justify-between">
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
-                  Generar PUD con IA
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
-
-            <Link to="/calificaciones">
-              <Button variant="ghost" size="md" className="w-full justify-between border border-slate-200 dark:border-slate-800">
-                <span className="flex items-center gap-2">
-                  <GraduationCap className="w-4 h-4" />
-                  Libro de calificaciones
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/30">
+            <Lock className="w-6 h-6 text-slate-400 mb-2" />
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Sección desactivada temporalmente
+            </p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+              Los atajos personalizados se habilitarán próximamente.
+            </p>
           </div>
         </Card>
       </div>
 
-      {/* 2. STATS RÁPIDAS (Dinámicas desde MongoDB) */}
+      {/* 2. STATS RÁPIDAS */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <Card className="p-4">
           <div className="flex items-center justify-between text-slate-500">
@@ -305,7 +402,7 @@ export const DashboardPage: React.FC = () => {
             {data?.estadisticas?.clasesPlanificadasSemana ?? 0}
           </div>
           <span className="text-[11px] text-slate-400">
-            Horas lectivas semanales
+            Bloques en tu horario semanal
           </span>
         </Card>
 
@@ -318,7 +415,7 @@ export const DashboardPage: React.FC = () => {
             {data?.estadisticas?.actividadesPorCalificar ?? 0}
           </div>
           <span className="text-[11px] text-slate-400">
-            Tareas pendientes
+            Columnas pendientes
           </span>
         </Card>
 
@@ -341,7 +438,7 @@ export const DashboardPage: React.FC = () => {
             <BookOpenCheck className="w-4 h-4 text-[#176087]" />
           </div>
           <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">
-            {data?.estadisticas?.informesGenerados ?? 0}
+            {data?.estadisticas?.unidadesActivas ?? data?.estadisticas?.informesGenerados ?? 0}
           </div>
           <span className="text-[11px] text-slate-400">
             Planificaciones curriculares
@@ -349,17 +446,16 @@ export const DashboardPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* 3. SECCIÓN INFERIOR — TO-DO CON CAMPOS COMPLETOS Y ACTIVIDADES */}
+      {/* 3. SECCIÓN INFERIOR — TO-DO SINCRONIZADO CON WORKSPACE KANBAN */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* To-Do Inteligente */}
         <Card className="lg:col-span-2 p-6 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#176087] dark:text-[#9ED8ED]" />
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Por Hacer (To-do Docente)
+                Por Hacer (Sincronizado con Workspace)
               </h3>
-              <InfoTooltip content="Lista priorizada automáticamente de tus pendientes diarios con semáforo de urgencia y fecha límite." />
+              <InfoTooltip content="Tus pendientes aquí están sincronizados directamente con el Tablero Kanban de tu Workspace." />
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-[#176087] dark:text-[#9ED8ED]">
@@ -376,16 +472,18 @@ export const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Formulario desplegable con Urgencia, Fecha límite y Observaciones (P3.2) */}
           {showTaskForm && (
-            <form onSubmit={handleAddTarea} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+            <form
+              onSubmit={handleAddTarea}
+              className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3"
+            >
               <div>
                 <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Título de la tarea
                 </label>
                 <input
                   type="text"
-                  placeholder="Ej: Preparar material para el bloque 3..."
+                  placeholder="Ej: Revisar ensayos de 8vo EGB..."
                   value={nuevaTareaTitulo}
                   onChange={(e) => setNuevaTareaTitulo(e.target.value)}
                   className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
@@ -403,9 +501,9 @@ export const DashboardPage: React.FC = () => {
                     onChange={(e) => setNuevaTareaUrgencia(e.target.value as any)}
                     className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white cursor-pointer"
                   >
-                    <option value="Alta">🔴 Alta (Urgente hoy / mañana)</option>
-                    <option value="Media">🟡 Media (Esta semana)</option>
-                    <option value="Baja">🔵 Baja (Proyectada)</option>
+                    <option value="Alta">Alta (Urgente)</option>
+                    <option value="Media">Media (Esta semana)</option>
+                    <option value="Baja">Baja (Proyectada)</option>
                   </select>
                 </div>
 
@@ -428,7 +526,7 @@ export const DashboardPage: React.FC = () => {
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Notas adicionales, estudiantes involucrados o acuerdos pedagógicos..."
+                  placeholder="Detalles o notas de la tarea..."
                   value={nuevaTareaObs}
                   onChange={(e) => setNuevaTareaObs(e.target.value)}
                   className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071727] text-slate-900 dark:text-white"
@@ -439,18 +537,18 @@ export const DashboardPage: React.FC = () => {
                 <Button type="button" variant="ghost" size="sm" onClick={() => setShowTaskForm(false)}>
                   Cancelar
                 </Button>
-                <Button type="submit" variant="primary" size="sm">
-                  Guardar Tarea
+                <Button type="submit" variant="primary" size="sm" isLoading={guardandoTarea}>
+                  Guardar
                 </Button>
               </div>
             </form>
           )}
 
-          {/* Lista de tareas */}
+          {/* Lista de tareas reales sincronizadas con Kanban */}
           {todoList.length === 0 ? (
             <EmptyState
-              mensaje="Aún no has creado tareas"
-              submensaje="Agrega pendientes o recordatorios docentes para mantenerte organizado."
+              mensaje="No tienes tareas pendientes en tu tablero"
+              submensaje="Crea una tarea aquí o en el Tablero Kanban de Workspace; ambas vistas se mantienen sincronizadas."
               accionTexto="Nueva tarea"
               onAccion={() => setShowTaskForm(true)}
               className="py-8"
@@ -469,7 +567,7 @@ export const DashboardPage: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={item.completada}
-                    onChange={() => handleToggleTodo(item.id)}
+                    onChange={() => handleToggleTodo(item)}
                     className="mt-1 w-4 h-4 rounded text-[#176087] cursor-pointer"
                   />
                   <div className="flex-1 min-w-0">
@@ -482,6 +580,9 @@ export const DashboardPage: React.FC = () => {
                         {item.titulo}
                       </p>
                       {getUrgenciaBadge(item.urgencia)}
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
+                        {item.columna}
+                      </span>
                       {item.fechaLimite && (
                         <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
                           <Clock className="w-3 h-3" /> {item.fechaLimite}
@@ -494,14 +595,12 @@ export const DashboardPage: React.FC = () => {
                       </p>
                     )}
                   </div>
-                  {item.link && (
-                    <Link
-                      to={item.link}
-                      className="text-xs font-bold text-[#176087] dark:text-[#9ED8ED] hover:underline shrink-0 self-center"
-                    >
-                      Ir →
-                    </Link>
-                  )}
+                  <Link
+                    to="/workspace"
+                    className="text-xs font-bold text-[#176087] dark:text-[#9ED8ED] hover:underline shrink-0 self-center"
+                  >
+                    Ver en Kanban →
+                  </Link>
                 </div>
               ))}
             </div>
@@ -514,7 +613,7 @@ export const DashboardPage: React.FC = () => {
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               Actividad Reciente
             </h3>
-            <InfoTooltip content="Registro histórico de tus últimas modificaciones en asistencia, notas y planes." />
+            <InfoTooltip content="Registro de tus últimas acciones en el portal." />
           </div>
 
           {Array.isArray(data?.ultimasActividades) && data.ultimasActividades.length > 0 ? (
@@ -555,7 +654,7 @@ export const DashboardPage: React.FC = () => {
               <p className="font-bold text-sky-900 dark:text-sky-300">Flujo diario recomendado:</p>
               <p>1. Toma de asistencia al inicio del bloque.</p>
               <p>2. Registro continuo de calificaciones sin recargar.</p>
-              <p>3. Generación automática de unidades PUD con IA.</p>
+              <p>3. Gestión de unidades curriculares y actividades.</p>
             </div>
             <div className="flex justify-end pt-2">
               <Button size="sm" onClick={() => setShowOnboarding(false)}>
